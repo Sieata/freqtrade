@@ -3,7 +3,7 @@
 # 或者在 PowerShell 中: . .\activate.ps1
 
 $env:PYTHONIOENCODING = "utf-8"
-Set-Location "C:\Users\sieata\Documents\freqtrade"
+Set-Location $PSScriptRoot
 .\.venv\Scripts\Activate.ps1
 Write-Host "Freqtrade 环境已激活!" -ForegroundColor Green
 Write-Host "当前目录: $(Get-Location)" -ForegroundColor Cyan
