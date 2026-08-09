@@ -20,12 +20,13 @@ class CrashBuyV1(IStrategy):
     timeframe = "4h"
     startup_candle_count: int = 250
 
-    stoploss = -0.12
-    trailing_stop = True
-    trailing_stop_positive = 0.02
-    trailing_stop_positive_offset = 0.05
-    trailing_only_offset_is_reached = True
-    minimal_roi = {"0": 0.25}
+    # ── 风控参数 ────────────────────────────────────────
+    stoploss = -0.12                         # 硬止损 -12%
+    trailing_stop = True                     # 尾随止损
+    trailing_stop_positive = 0.02            # 步长 2%
+    trailing_stop_positive_offset = 0.05     # 盈利 5% 后激活
+    trailing_only_offset_is_reached = True   # 到达偏移后才启动
+    minimal_roi = {"0": 0.25}                # 止盈 25%（实际靠尾随离场）
 
     use_exit_signal = True
     exit_profit_only = False

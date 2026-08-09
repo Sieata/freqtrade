@@ -1,7 +1,10 @@
 """
 WeekendReverseV1 — 周末低流动性反转
 
-窗口：周末+周一美股盘前 | 4h单根跌>2% | 阳线做多 | 十品种通用
+做多策略。4h K线。窗口：周六日+周一美股盘前（北京时间21:00前）。
+入场：单根跌 >2% + 阳线确认。十品种统一参数，9/10 盈利。
+
+风控：-10% 硬止损 | 盈利 1.2% 激活尾随、步长 0.3% | 8% 止盈 | EMA20 离场
 """
 
 from datetime import datetime, timedelta, timezone
@@ -19,12 +22,13 @@ class WeekendReverseV1(IStrategy):
     timeframe = "4h"
     startup_candle_count: int = 250
 
-    stoploss = -0.10
-    trailing_stop = True
-    trailing_stop_positive = 0.003
-    trailing_stop_positive_offset = 0.012
-    trailing_only_offset_is_reached = True
-    minimal_roi = {"0": 0.08}
+    # ── 风控参数 ────────────────────────────────────────
+    stoploss = -0.10                         # 硬止损 -10%
+    trailing_stop = True                     # 尾随止损
+    trailing_stop_positive = 0.003           # 步长 0.3%
+    trailing_stop_positive_offset = 0.012    # 盈利 1.2% 后激活
+    trailing_only_offset_is_reached = True   # 到达偏移后才启动
+    minimal_roi = {"0": 0.08}                # 止盈 8%
 
     use_exit_signal = True; exit_profit_only = False; ignore_roi_if_entry_signal = False
     max_open_trades = 1; process_only_new_candles = True

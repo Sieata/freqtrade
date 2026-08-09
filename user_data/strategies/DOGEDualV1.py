@@ -1,7 +1,10 @@
 """
 DOGEDualV1 — 暴跌做多 + 暴涨做空
 
-V3 的镜像版：4期涨>8%后阴线做空，4期跌>8%后阳线做多。
+双向策略。4h K线。4 期跌 >8% 后阳线做多，4 期涨 >8% 后阴线做空。
+❌ 过拟合对照：仅 DOGE 盈利，换品种崩。统一参数仅对 DOGE 有效。
+
+风控：-12% 硬止损 | 盈利 6% 激活尾随、步长 3% | 25% 止盈 | EMA20 离场
 """
 
 from datetime import datetime, timedelta, timezone
@@ -20,12 +23,12 @@ class DOGEDualV1(IStrategy):
     startup_candle_count: int = 250
 
     # ── 多空共用风控 ────────────────────────────────────
-    stoploss = -0.12
-    trailing_stop = True
-    trailing_stop_positive = 0.03
-    trailing_stop_positive_offset = 0.06
-    trailing_only_offset_is_reached = True
-    minimal_roi = {"0": 0.25}
+    stoploss = -0.12                         # 硬止损 -12%
+    trailing_stop = True                     # 尾随止损
+    trailing_stop_positive = 0.03            # 步长 3%
+    trailing_stop_positive_offset = 0.06     # 盈利 6% 后激活
+    trailing_only_offset_is_reached = True   # 到达偏移后才启动
+    minimal_roi = {"0": 0.25}                # 止盈 25%（实际靠尾随离场）
 
     use_exit_signal = True
     exit_profit_only = False
