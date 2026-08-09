@@ -15,3 +15,12 @@ Write-Host "  freqtrade download-data -t 5m -p BTC/USDT      - 下载数据"
 Write-Host "  freqtrade backtesting --strategy SampleStrategy - 回测"
 Write-Host "  freqtrade trade --dry-run            - 模拟交易"
 Write-Host "  freqtrade webserver                  - 启动Web管理界面"
+Write-Host ""
+
+# 自动检查数据，缺失则静默下载
+$DataDir = "$PSScriptRoot\user_data\data"
+$hasData = Get-ChildItem -Path $DataDir -File -ErrorAction SilentlyContinue
+if (-not $hasData) {
+    Write-Host "K线数据缺失，自动下载中..." -ForegroundColor Yellow
+    & "$PSScriptRoot\ensure-data.ps1"
+}
