@@ -19,6 +19,8 @@ user_data/models/*
 user_data/notebooks/*
 !user_data/config.json
 !user_data/config_perpetual.json
+!user_data/config_bigmove.json
+!user_data/docs/
 freqtrade-plot.html
 freqtrade-profit-plot.html
 freqtrade/rpc/api_server/ui/*
