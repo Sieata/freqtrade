@@ -1,0 +1,355 @@
+<title>Wrong Pond</title>
+<style>
+  :root {
+    --bg: #F4F2EC;
+    --surface: #FCFBF8;
+    --surface-2: #EFECE3;
+    --ink: #191C21;
+    --ink-dim: #62676F;
+    --ink-faint: #9AA0A8;
+    --accent: #A87A1B;
+    --win: #17865C;
+    --win-bg: rgba(23, 134, 92, 0.10);
+    --loss: #C23B31;
+    --loss-bg: rgba(194, 59, 49, 0.10);
+    --line: #E3DFD4;
+    --grid: #ECE8DD;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0B0E13;
+      --surface: #12161D;
+      --surface-2: #191F29;
+      --ink: #E7E4DB;
+      --ink-dim: #97A0AC;
+      --ink-faint: #5A6470;
+      --accent: #D9A441;
+      --win: #3FBF8F;
+      --win-bg: rgba(63, 191, 143, 0.12);
+      --loss: #E05B4D;
+      --loss-bg: rgba(224, 91, 77, 0.12);
+      --line: #1E2530;
+      --grid: #1B2230;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0B0E13;
+    --surface: #12161D;
+    --surface-2: #191F29;
+    --ink: #E7E4DB;
+    --ink-dim: #97A0AC;
+    --ink-faint: #5A6470;
+    --accent: #D9A441;
+    --win: #3FBF8F;
+    --win-bg: rgba(63, 191, 143, 0.12);
+    --loss: #E05B4D;
+    --loss-bg: rgba(224, 91, 77, 0.12);
+    --line: #1E2530;
+    --grid: #1B2230;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 72px; }
+
+  /* ── header ─────────────────────────────── */
+  header { padding: 40px 0 8px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 40px; line-height: 1.05; letter-spacing: -0.02em;
+    margin: 0 0 14px; font-weight: 720; text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px; color: var(--ink-dim); max-width: 66ch; margin: 0 0 8px;
+    text-wrap: pretty;
+  }
+  .lede strong { color: var(--ink); font-weight: 650; }
+  .meta {
+    font-size: 13px; color: var(--ink-faint); margin: 0;
+  }
+
+  /* ── KPI strip ──────────────────────────── */
+  .kpis {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    gap: 12px; margin: 28px 0 8px;
+  }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 16px 14px;
+  }
+  .kpi .label {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; margin-bottom: 8px;
+  }
+  .kpi .value { font-size: 26px; font-weight: 680; letter-spacing: -0.01em; }
+  .kpi .sub { font-size: 12px; color: var(--ink-dim); margin-top: 3px; }
+  .pos { color: var(--win); }
+  .neg { color: var(--loss); }
+  .accent { color: var(--accent); }
+
+  /* ── sections ───────────────────────────── */
+  section { margin-top: 40px; }
+  .sect-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 18px;
+  }
+  .sect-head h2 { font-size: 17px; margin: 0; font-weight: 680; letter-spacing: -0.01em; }
+  .sect-head .note { font-size: 12px; color: var(--ink-faint); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 22px;
+  }
+
+  /* ── pair table ─────────────────────────── */
+  .ptable { width: 100%; border-collapse: collapse; }
+  .ptable th {
+    text-align: right; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; padding: 0 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ptable th:first-child, .ptable td:first-child { text-align: left; padding-left: 0; }
+  .ptable th:last-child, .ptable td:last-child { padding-right: 0; }
+  .ptable td { padding: 11px 10px; border-bottom: 1px solid var(--grid); text-align: right; }
+  .ptable tr:last-child td { border-bottom: none; }
+  .ptable tbody tr:hover td { background: var(--surface-2); }
+  .ptable .pair { font-weight: 640; font-size: 14px; }
+  .ptable .pair .tag {
+    display: inline-block; font-size: 10px; letter-spacing: 0.04em;
+    padding: 1px 6px; border-radius: 4px; margin-left: 7px;
+    vertical-align: 1px; font-weight: 700;
+  }
+  .tag.bad { background: var(--loss-bg); color: var(--loss); }
+  .tag.mid { background: var(--accent); color: #fff; opacity: 0.85; }
+
+  /* divergent bar */
+  .dbar { position: relative; height: 9px; min-width: 160px; }
+  .dbar .zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-faint); opacity: 0.35; }
+  .dbar .fill { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+  .dbar .fill.pos { right: 50%; margin-right: 2px; background: var(--win); }
+  .dbar .fill.neg { left: 50%; margin-left: 2px; background: var(--loss); }
+
+  /* ── two-col grid ───────────────────────── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* exit reason rows */
+  .exit { display: flex; flex-direction: column; gap: 18px; }
+  .exit-row .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .exit-row .name { font-size: 14px; font-weight: 640; }
+  .exit-row .name span { color: var(--ink-faint); font-weight: 500; font-size: 12px; margin-left: 6px; }
+  .exit-row .amt { font-size: 16px; font-weight: 680; }
+  .ebar { height: 10px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+  .ebar .fill { height: 100%; border-radius: 3px; }
+  .ebar .fill.win { background: var(--win); }
+  .ebar .fill.loss { background: var(--loss); }
+
+  /* year bars */
+  .years { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; align-items: end; }
+  .yr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .yr .val { font-size: 14px; font-weight: 680; }
+  .yr .bar {
+    width: 100%; background: var(--win); border-radius: 4px 4px 2px 2px;
+    min-height: 3px;
+  }
+  .yr .cap { font-size: 12px; color: var(--ink-dim); text-align: center; line-height: 1.3; }
+  .yr .cap .yr-win { color: var(--ink-faint); }
+
+  /* histogram */
+  .hist-wrap { position: relative; }
+  .hist { display: flex; align-items: flex-end; gap: 2px; height: 180px; padding: 0 4px; }
+  .hbin { flex: 1; border-radius: 2px 2px 0 0; }
+  .hbin.neg { background: var(--loss); }
+  .hbin.pos { background: var(--win); }
+  .haxis {
+    display: flex; justify-content: space-between; margin-top: 8px;
+    font-size: 11px; color: var(--ink-faint);
+  }
+  .hlegend { display: flex; gap: 18px; margin-top: 14px; font-size: 12px; color: var(--ink-dim); }
+  .hlegend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .hlegend .dot.win { background: var(--win); }
+  .hlegend .dot.loss { background: var(--loss); }
+
+  /* conclusions */
+  .concl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .concl-item {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; border-top: 3px solid var(--accent);
+  }
+  .concl-item h3 { font-size: 14px; margin: 0 0 8px; font-weight: 680; }
+  .concl-item p { font-size: 13px; color: var(--ink-dim); margin: 0; line-height: 1.6; }
+  .concl-item p strong { color: var(--ink); }
+
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-faint); }
+
+  @media (max-width: 860px) {
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .grid2 { grid-template-columns: 1fr; }
+    .concl { grid-template-columns: 1fr; }
+    .years { grid-template-columns: repeat(5, 1fr); }
+    h1 { font-size: 32px; }
+    .dbar { min-width: 90px; }
+  }
+  @media (max-width: 520px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .years { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">Strategy Backtest · Futures · 4h · Market-Cap Top 10</p>
+    <h1>Wrong Pond</h1>
+    <p class="lede">
+      市值 Top10 的周末反转验证。近四年，在 BTC / ETH / SOL 等十大市值品种上跑出 <strong>89.4% 胜率、$24,266 利润</strong>——但大币的 edge 只有优化 8 品种组合的 <strong>12%</strong>，回撤却翻倍到 <strong>49%</strong>。BNB 与 LINK 继续深度亏损，正好印证了选池时排除它们的决策。
+    </p>
+    <p class="meta">区间 2022-08-13 → 2026-08-13 · 市值 Top10：BTC / ETH / SOL / XRP / BNB / DOGE / ADA / AVAX / DOT / LINK · 参数：−10% 硬止损 / 尾随 1.5% 激活 / 8% 止盈 / 无 EMA 离场 · $1,000 满仓复利</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- KPI -->
+  <div class="kpis">
+    <div class="kpi"><div class="label">累计利润</div><div class="value mono pos">+$24,266</div><div class="sub">$1,000 复利</div></div>
+    <div class="kpi"><div class="label">胜率</div><div class="value mono">89.4%</div><div class="sub">355 胜 / 42 负</div></div>
+    <div class="kpi"><div class="label">最大回撤</div><div class="value mono neg">49.0%</div><div class="sub">峰值到谷值</div></div>
+    <div class="kpi"><div class="label">CAGR</div><div class="value mono">125.1%</div><div class="sub">年化复利</div></div>
+    <div class="kpi"><div class="label">夏普</div><div class="value mono">1.00</div><div class="sub">索提诺 0.58</div></div>
+    <div class="kpi"><div class="label">交易笔数</div><div class="value mono">397</div><div class="sub">平均持仓 19h</div></div>
+  </div>
+
+  <!-- pair table -->
+  <section>
+    <div class="sect-head">
+      <h2>逐品种表现</h2>
+      <span class="note">8 盈利 / 2 亏损 · 发散条：绿=盈利（右），红=亏损（左）</span>
+    </div>
+    <div class="card" style="overflow-x:auto;">
+      <table class="ptable">
+        <thead>
+          <tr><th>品种</th><th>笔数</th><th>胜率</th><th>利润</th><th>分布</th><th>回撤</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="pair">SOL</td><td class="mono">79</td><td class="mono">94.9%</td><td class="mono pos">+$6,527</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:50%;"></div></div></td><td class="mono">25.9%</td></tr>
+          <tr><td class="pair">ETH</td><td class="mono">41</td><td class="mono">92.7%</td><td class="mono pos">+$5,655</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:43.3%;"></div></div></td><td class="mono">45.3%</td></tr>
+          <tr><td class="pair">DOGE</td><td class="mono">58</td><td class="mono">89.7%</td><td class="mono pos">+$3,934</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:30.1%;"></div></div></td><td class="mono">44.6%</td></tr>
+          <tr><td class="pair">ADA</td><td class="mono">34</td><td class="mono">91.2%</td><td class="mono pos">+$3,879</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:29.7%;"></div></div></td><td class="mono">37.8%</td></tr>
+          <tr><td class="pair">BTC</td><td class="mono">35</td><td class="mono">94.3%</td><td class="mono pos">+$2,747</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:21.0%;"></div></div></td><td class="mono">42.5%</td></tr>
+          <tr><td class="pair">AVAX</td><td class="mono">44</td><td class="mono">86.4%</td><td class="mono pos">+$2,280</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:17.5%;"></div></div></td><td class="mono neg">91.8%</td></tr>
+          <tr><td class="pair">DOT</td><td class="mono">22</td><td class="mono">81.8%</td><td class="mono pos">+$2,197</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:16.8%;"></div></div></td><td class="mono">48.3%</td></tr>
+          <tr><td class="pair">XRP</td><td class="mono">48</td><td class="mono">89.6%</td><td class="mono pos">+$700</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:5.4%;"></div></div></td><td class="mono neg">60.3%</td></tr>
+          <tr><td class="pair">LINK <span class="tag mid">打平</span></td><td class="mono">21</td><td class="mono">81.0%</td><td class="mono neg">−$19</td><td><div class="dbar"><div class="zero"></div><div class="fill neg" style="width:0.15%;"></div></div></td><td class="mono neg">91.4%</td></tr>
+          <tr><td class="pair">BNB <span class="tag bad">结构性亏损</span></td><td class="mono">15</td><td class="mono">66.7%</td><td class="mono neg">−$3,633</td><td><div class="dbar"><div class="zero"></div><div class="fill neg" style="width:27.8%;"></div></div></td><td class="mono neg">295.3%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- exit + year -->
+  <section>
+    <div class="grid2">
+      <div>
+        <div class="sect-head"><h2>退出原因</h2><span class="note">盈亏全来自这三条路径</span></div>
+        <div class="card exit">
+          <div class="exit-row">
+            <div class="top"><span class="name">尾随止损 <span>332 笔 · 100% 胜</span></span><span class="amt mono pos">+$40,791</span></div>
+            <div class="ebar"><div class="fill win" style="width:100%;"></div></div>
+          </div>
+          <div class="exit-row">
+            <div class="top"><span class="name">止盈 8% <span>23 笔 · 100% 胜</span></span><span class="amt mono pos">+$8,261</span></div>
+            <div class="ebar"><div class="fill win" style="width:20.2%;"></div></div>
+          </div>
+          <div class="exit-row">
+            <div class="top"><span class="name">硬止损 −10% <span>42 笔 · 0% 胜</span></span><span class="amt mono neg">−$24,786</span></div>
+            <div class="ebar"><div class="fill loss" style="width:60.8%;"></div></div>
+          </div>
+          <p class="meta" style="margin:0;">结构：全部亏损来自 42 笔硬止损；全部盈利来自 355 笔尾随+止盈。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="sect-head"><h2>年度趋势</h2><span class="note">利润集中在 2025-2026 · 2022 熊市几乎打平</span></div>
+        <div class="card">
+          <div class="years">
+            <div class="yr"><div class="val mono">+$55</div><div class="bar" style="height:3px;"></div><div class="cap">2022<sub>8月起</sub><br><span class="yr-win">43 笔 · 86.0%</span></div></div>
+            <div class="yr"><div class="val mono">+$1,324</div><div class="bar" style="height:17px;"></div><div class="cap">2023<br><span class="yr-win">79 笔 · 89.9%</span></div></div>
+            <div class="yr"><div class="val mono">+$3,023</div><div class="bar" style="height:39px;"></div><div class="cap">2024<br><span class="yr-win">117 笔 · 89.7%</span></div></div>
+            <div class="yr"><div class="val mono">+$12,425</div><div class="bar" style="height:160px;"></div><div class="cap">2025<br><span class="yr-win">110 笔 · 88.2%</span></div></div>
+            <div class="yr"><div class="val mono">+$7,440</div><div class="bar" style="height:96px;"></div><div class="cap">2026<sub>至今</sub><br><span class="yr-win">48 笔 · 93.8%</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- histogram -->
+  <section>
+    <div class="sect-head">
+      <h2>单笔盈亏分布</h2>
+      <span class="note">397 笔 · 中位 +$53 · 均值 +$61</span>
+    </div>
+    <div class="card">
+      <div class="hist-wrap">
+        <div class="hist" id="hist"></div>
+        <div class="haxis"><span>−$2,333</span><span>$0</span><span>+$787</span></div>
+      </div>
+      <div class="hlegend">
+        <span><span class="dot loss"></span>亏损 42 笔 · 平均 −$590</span>
+        <span><span class="dot win"></span>盈利 355 笔 · 平均 +$138</span>
+        <span>右偏：主峰在 +$11~$88（198 笔），盈利薄而密集</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- conclusions -->
+  <section>
+    <div class="sect-head"><h2>三个结论</h2></div>
+    <div class="concl">
+      <div class="concl-item">
+        <h3>大市值不是这个策略的猎场</h3>
+        <p>市值 Top10 四年利润 <strong>$24,266，只有优化 8 品种组合（$206,386）的 12%</strong>，回撤却从 20.5% 翻倍到 49%。真正的 alpha 来自 BANK / CYS / HYPE 这类中小市值、高波动品种。</p>
+      </div>
+      <div class="concl-item">
+        <h3>BNB / LINK 再次印证排除决策</h3>
+        <p>这十个大币里，唯一大幅亏损的 <strong>BNB（−$3,633）与打平的 LINK（−$19）</strong>，正好是选池时"市值 Top10 除 BNB、LINK"被拿掉的两个。不是巧合，是它们在策略下天然不适用。</p>
+      </div>
+      <div class="concl-item">
+        <h3>盈亏不对称在大币上更致命</h3>
+        <p>42 笔止损平均 −$590，355 笔盈利平均仅 +$138；最惨单笔 BNB −$2,333。大币波动低、单笔利润薄，靠<strong>高胜率 + 满仓复利</strong>，一旦连续止损回撤快速放大。</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：freqtrade backtesting（config_perpetual.json，WeekendReverseV1 策略，2022-08-13 → 2026-08-13）· 市值 Top10 = BTC / ETH / SOL / XRP / BNB / DOGE / ADA / AVAX / DOT / LINK · 逐品种利润为满仓复利口径，受交易顺序影响，合计为可比指标 · 生成于 2026-08-13
+  </footer>
+</div>
+
+<script>
+  const BINS = [1, 0, 0, 1, 3, 1, 1, 0, 1, 2, 3, 5, 12, 12, 198, 48, 43, 18, 23, 9, 6, 6, 2, 2];
+  const MAX = 198;
+  const hist = document.getElementById('hist');
+  BINS.forEach((c, i) => {
+    const b = document.createElement('div');
+    b.className = 'hbin ' + (i < 14 ? 'neg' : 'pos');
+    b.style.height = (c > 0 ? Math.max(c / MAX * 100, 2) : 0) + '%';
+    b.setAttribute('aria-label', c + ' trades');
+    hist.appendChild(b);
+  });
+</script>

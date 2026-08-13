@@ -1,0 +1,352 @@
+<title>Weekend Reverse</title>
+<style>
+  :root {
+    --bg: #F4F2EC;
+    --surface: #FCFBF8;
+    --surface-2: #EFECE3;
+    --ink: #191C21;
+    --ink-dim: #62676F;
+    --ink-faint: #9AA0A8;
+    --accent: #A87A1B;
+    --win: #17865C;
+    --win-bg: rgba(23, 134, 92, 0.10);
+    --loss: #C23B31;
+    --loss-bg: rgba(194, 59, 49, 0.10);
+    --line: #E3DFD4;
+    --grid: #ECE8DD;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0B0E13;
+      --surface: #12161D;
+      --surface-2: #191F29;
+      --ink: #E7E4DB;
+      --ink-dim: #97A0AC;
+      --ink-faint: #5A6470;
+      --accent: #D9A441;
+      --win: #3FBF8F;
+      --win-bg: rgba(63, 191, 143, 0.12);
+      --loss: #E05B4D;
+      --loss-bg: rgba(224, 91, 77, 0.12);
+      --line: #1E2530;
+      --grid: #1B2230;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0B0E13;
+    --surface: #12161D;
+    --surface-2: #191F29;
+    --ink: #E7E4DB;
+    --ink-dim: #97A0AC;
+    --ink-faint: #5A6470;
+    --accent: #D9A441;
+    --win: #3FBF8F;
+    --win-bg: rgba(63, 191, 143, 0.12);
+    --loss: #E05B4D;
+    --loss-bg: rgba(224, 91, 77, 0.12);
+    --line: #1E2530;
+    --grid: #1B2230;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 72px; }
+
+  /* ── header ─────────────────────────────── */
+  header { padding: 40px 0 8px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 40px; line-height: 1.05; letter-spacing: -0.02em;
+    margin: 0 0 14px; font-weight: 720; text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px; color: var(--ink-dim); max-width: 62ch; margin: 0 0 8px;
+    text-wrap: pretty;
+  }
+  .lede strong { color: var(--ink); font-weight: 650; }
+  .meta {
+    font-size: 13px; color: var(--ink-faint); margin: 0;
+  }
+
+  /* ── KPI strip ──────────────────────────── */
+  .kpis {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    gap: 12px; margin: 28px 0 8px;
+  }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 16px 14px;
+  }
+  .kpi .label {
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; margin-bottom: 8px;
+  }
+  .kpi .value { font-size: 26px; font-weight: 680; letter-spacing: -0.01em; }
+  .kpi .sub { font-size: 12px; color: var(--ink-dim); margin-top: 3px; }
+  .pos { color: var(--win); }
+  .neg { color: var(--loss); }
+  .accent { color: var(--accent); }
+
+  /* ── sections ───────────────────────────── */
+  section { margin-top: 40px; }
+  .sect-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 18px;
+  }
+  .sect-head h2 { font-size: 17px; margin: 0; font-weight: 680; letter-spacing: -0.01em; }
+  .sect-head .note { font-size: 12px; color: var(--ink-faint); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 22px;
+  }
+
+  /* ── pair table ─────────────────────────── */
+  .ptable { width: 100%; border-collapse: collapse; }
+  .ptable th {
+    text-align: right; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; padding: 0 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .ptable th:first-child, .ptable td:first-child { text-align: left; padding-left: 0; }
+  .ptable th:last-child, .ptable td:last-child { padding-right: 0; }
+  .ptable td { padding: 11px 10px; border-bottom: 1px solid var(--grid); text-align: right; }
+  .ptable tr:last-child td { border-bottom: none; }
+  .ptable tbody tr:hover td { background: var(--surface-2); }
+  .ptable .pair { font-weight: 640; font-size: 14px; }
+  .ptable .pair .tag {
+    display: inline-block; font-size: 10px; letter-spacing: 0.04em;
+    padding: 1px 6px; border-radius: 4px; margin-left: 7px;
+    vertical-align: 1px; font-weight: 700;
+  }
+  .tag.bad { background: var(--loss-bg); color: var(--loss); }
+  .tag.mid { background: var(--accent); color: #fff; opacity: 0.85; }
+
+  /* divergent bar */
+  .dbar { position: relative; height: 9px; min-width: 160px; }
+  .dbar .zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-faint); opacity: 0.35; }
+  .dbar .fill { position: absolute; top: 0; height: 100%; border-radius: 2px; }
+  .dbar .fill.pos { right: 50%; margin-right: 2px; background: var(--win); }
+  .dbar .fill.neg { left: 50%; margin-left: 2px; background: var(--loss); }
+
+  /* ── two-col grid ───────────────────────── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* exit reason rows */
+  .exit { display: flex; flex-direction: column; gap: 18px; }
+  .exit-row .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .exit-row .name { font-size: 14px; font-weight: 640; }
+  .exit-row .name span { color: var(--ink-faint); font-weight: 500; font-size: 12px; margin-left: 6px; }
+  .exit-row .amt { font-size: 16px; font-weight: 680; }
+  .ebar { height: 10px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+  .ebar .fill { height: 100%; border-radius: 3px; }
+  .ebar .fill.win { background: var(--win); }
+  .ebar .fill.loss { background: var(--loss); }
+
+  /* year bars */
+  .years { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: end; }
+  .yr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .yr .val { font-size: 14px; font-weight: 680; }
+  .yr .bar {
+    width: 100%; background: var(--win); border-radius: 4px 4px 2px 2px;
+    min-height: 3px;
+  }
+  .yr .cap { font-size: 12px; color: var(--ink-dim); text-align: center; line-height: 1.3; }
+  .yr .cap .yr-win { color: var(--ink-faint); }
+
+  /* histogram */
+  .hist-wrap { position: relative; }
+  .hist { display: flex; align-items: flex-end; gap: 2px; height: 180px; padding: 0 4px; }
+  .hbin { flex: 1; border-radius: 2px 2px 0 0; }
+  .hbin.neg { background: var(--loss); }
+  .hbin.pos { background: var(--win); }
+  .haxis {
+    display: flex; justify-content: space-between; margin-top: 8px;
+    font-size: 11px; color: var(--ink-faint);
+  }
+  .hlegend { display: flex; gap: 18px; margin-top: 14px; font-size: 12px; color: var(--ink-dim); }
+  .hlegend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .hlegend .dot.win { background: var(--win); }
+  .hlegend .dot.loss { background: var(--loss); }
+
+  /* conclusions */
+  .concl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .concl-item {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; border-top: 3px solid var(--accent);
+  }
+  .concl-item h3 { font-size: 14px; margin: 0 0 8px; font-weight: 680; }
+  .concl-item p { font-size: 13px; color: var(--ink-dim); margin: 0; line-height: 1.6; }
+  .concl-item p strong { color: var(--ink); }
+
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-faint); }
+
+  @media (max-width: 860px) {
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .grid2 { grid-template-columns: 1fr; }
+    .concl { grid-template-columns: 1fr; }
+    h1 { font-size: 32px; }
+    .dbar { min-width: 90px; }
+  }
+  @media (max-width: 520px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">Strategy Backtest · Futures · 4h</p>
+    <h1>Weekend Reverse</h1>
+    <p class="lede">
+      周末低流动性反转策略。近三年，在 10 大品种上跑出 <strong>88.9% 胜率、$19,126 利润</strong>——但 32.6% 的回撤几乎全部来自两个结构性亏损品种 <strong>BNB 与 HOME</strong>。
+    </p>
+    <p class="meta">区间 2023-08-13 → 2026-08-13 · 参数：−10% 硬止损 / 尾随 1.5% 激活 / 8% 止盈 / 无 EMA 离场 · $1,000 满仓复利</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- KPI -->
+  <div class="kpis">
+    <div class="kpi"><div class="label">累计利润</div><div class="value mono pos">+$19,126</div><div class="sub">$1,000 复利</div></div>
+    <div class="kpi"><div class="label">胜率</div><div class="value mono">88.9%</div><div class="sub">311 胜 / 39 负</div></div>
+    <div class="kpi"><div class="label">最大回撤</div><div class="value mono neg">32.6%</div><div class="sub">峰值到谷值</div></div>
+    <div class="kpi"><div class="label">CAGR</div><div class="value mono">173.8%</div><div class="sub">年化复利</div></div>
+    <div class="kpi"><div class="label">夏普</div><div class="value mono">0.74</div><div class="sub">索提诺 0.57</div></div>
+    <div class="kpi"><div class="label">交易笔数</div><div class="value mono">350</div><div class="sub">平均持仓 14h</div></div>
+  </div>
+
+  <!-- pair table -->
+  <section>
+    <div class="sect-head">
+      <h2>逐品种表现</h2>
+      <span class="note">8 盈利 / 2 亏损 · 发散条：绿=盈利（右），红=亏损（左）</span>
+    </div>
+    <div class="card" style="overflow-x:auto;">
+      <table class="ptable">
+        <thead>
+          <tr><th>品种</th><th>笔数</th><th>胜率</th><th>利润</th><th>分布</th><th>回撤</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="pair">BANK</td><td class="mono">54</td><td class="mono">87.0%</td><td class="mono pos">+$8,401</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:50%;"></div></div></td><td class="mono neg">64.2%</td></tr>
+          <tr><td class="pair">CYS</td><td class="mono">21</td><td class="mono">95.2%</td><td class="mono pos">+$6,049</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:36%;"></div></div></td><td class="mono">34.2%</td></tr>
+          <tr><td class="pair">ZEC</td><td class="mono">75</td><td class="mono">88.0%</td><td class="mono pos">+$4,153</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:24.7%;"></div></div></td><td class="mono neg">48.2%</td></tr>
+          <tr><td class="pair">SOL</td><td class="mono">53</td><td class="mono">96.2%</td><td class="mono pos">+$2,565</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:15.3%;"></div></div></td><td class="mono">23.5%</td></tr>
+          <tr><td class="pair">ETH</td><td class="mono">28</td><td class="mono">92.9%</td><td class="mono pos">+$1,872</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:11.1%;"></div></div></td><td class="mono">27.2%</td></tr>
+          <tr><td class="pair">HYPE</td><td class="mono">11</td><td class="mono">100%</td><td class="mono pos">+$1,494</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:8.9%;"></div></div></td><td class="mono">0.0%</td></tr>
+          <tr><td class="pair">BTC</td><td class="mono">23</td><td class="mono">95.7%</td><td class="mono pos">+$1,315</td><td><div class="dbar"><div class="zero"></div><div class="fill pos" style="width:7.8%;"></div></div></td><td class="mono neg">42.3%</td></tr>
+          <tr><td class="pair">XRP <span class="tag mid">打平</span></td><td class="mono">37</td><td class="mono">86.5%</td><td class="mono neg">−$65</td><td><div class="dbar"><div class="zero"></div><div class="fill neg" style="width:0.4%;"></div></div></td><td class="mono neg">57.9%</td></tr>
+          <tr><td class="pair">BNB <span class="tag bad">结构性亏损</span></td><td class="mono">13</td><td class="mono">69.2%</td><td class="mono neg">−$2,518</td><td><div class="dbar"><div class="zero"></div><div class="fill neg" style="width:15%;"></div></div></td><td class="mono neg">224%</td></tr>
+          <tr><td class="pair">HOME <span class="tag bad">结构性亏损</span></td><td class="mono">35</td><td class="mono">77.1%</td><td class="mono neg">−$4,139</td><td><div class="dbar"><div class="zero"></div><div class="fill neg" style="width:24.6%;"></div></div></td><td class="mono neg">201%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- exit + year -->
+  <section>
+    <div class="grid2">
+      <div>
+        <div class="sect-head"><h2>退出原因</h2><span class="note">盈亏全来自这三条路径</span></div>
+        <div class="card exit">
+          <div class="exit-row">
+            <div class="top"><span class="name">尾随止损 <span>289 笔 · 100% 胜</span></span><span class="amt mono pos">+$40,273</span></div>
+            <div class="ebar"><div class="fill win" style="width:100%;"></div></div>
+          </div>
+          <div class="exit-row">
+            <div class="top"><span class="name">止盈 8% <span>22 笔 · 100% 胜</span></span><span class="amt mono pos">+$13,857</span></div>
+            <div class="ebar"><div class="fill win" style="width:34.4%;"></div></div>
+          </div>
+          <div class="exit-row">
+            <div class="top"><span class="name">硬止损 −10% <span>39 笔 · 0% 胜</span></span><span class="amt mono neg">−$35,004</span></div>
+            <div class="ebar"><div class="fill loss" style="width:86.9%;"></div></div>
+          </div>
+          <p class="meta" style="margin:0;">结构：全部亏损来自 39 笔硬止损；全部盈利来自 311 笔尾随+止盈。</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="sect-head"><h2>年度趋势</h2><span class="note">利润逐年上升 · 胜率逐年下降</span></div>
+        <div class="card">
+          <div class="years">
+            <div class="yr"><div class="val mono">+$559</div><div class="bar" style="height:18px;"></div><div class="cap">2023<sub>8月起</sub><br><span class="yr-win">18 笔 · 100%</span></div></div>
+            <div class="yr"><div class="val mono">+$1,123</div><div class="bar" style="height:36px;"></div><div class="cap">2024<br><span class="yr-win">82 笔 · 90.2%</span></div></div>
+            <div class="yr"><div class="val mono">+$7,412</div><div class="bar" style="height:118px;"></div><div class="cap">2025<br><span class="yr-win">134 笔 · 89.6%</span></div></div>
+            <div class="yr"><div class="val mono">+$10,032</div><div class="bar" style="height:160px;"></div><div class="cap">2026<sub>至今</sub><br><span class="yr-win">116 笔 · 85.3%</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- histogram -->
+  <section>
+    <div class="sect-head">
+      <h2>单笔盈亏分布</h2>
+      <span class="note">350 笔 · 中位 +$75 · 均值 +$55</span>
+    </div>
+    <div class="card">
+      <div class="hist-wrap">
+        <div class="hist" id="hist"></div>
+        <div class="haxis"><span>−$2,024</span><span>$0</span><span>+$1,482</span></div>
+      </div>
+      <div class="hlegend">
+        <span><span class="dot loss"></span>亏损 39 笔 · 平均 −$898</span>
+        <span><span class="dot win"></span>盈利 311 笔 · 平均 +$174</span>
+        <span>右偏：多数是小盈利，主峰在 +$0~$166（180 笔）</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- conclusions -->
+  <section>
+    <div class="sect-head"><h2>三个结论</h2></div>
+    <div class="concl">
+      <div class="concl-item">
+        <h3>排除 BNB / HOME 是对的</h3>
+        <p>近三年是独立样本外区间，<strong>BNB（−$2,518）与 HOME（−$4,139）依然深度亏损</strong>，合计 −$6,657，拖掉了 8 个盈利品种 1/4 的战果。落地版用 8 品种正是为此。</p>
+      </div>
+      <div class="concl-item">
+        <h3>回撤几乎全来自这两个品种</h3>
+        <p>10 品种口径回撤 32.6%，明显高于 8 品种全期的 20.5%。<strong>差值就是 BNB/HOME 的贡献</strong>——这也对应 forward-test 判据里"回撤 ≤30%"的红线。</p>
+      </div>
+      <div class="concl-item">
+        <h3>盈亏不对称是唯一的结构性风险</h3>
+        <p>亏 39 笔平均 −$898，赢 311 笔平均仅 +$174。策略吃的是<strong>高胜率 + 满仓复利</strong>，一旦遭遇连续硬止损，账户回撤会快速放大。</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：freqtrade backtesting（config_perpetual.json，WeekendReverseV1 策略，2023-08-13 → 2026-08-13）· 逐品种利润为满仓复利口径，受交易顺序影响，合计为可比指标 · 生成于 2026-08-13
+  </footer>
+</div>
+
+<script>
+  const BINS = [2,3,2,2,2,3,3,1,3,5,0,5,8,35,180,50,15,16,3,2,3,1,4,2];
+  const MAX = 180;
+  const hist = document.getElementById('hist');
+  BINS.forEach((c, i) => {
+    const b = document.createElement('div');
+    b.className = 'hbin ' + (i < 14 ? 'neg' : 'pos');
+    b.style.height = (c > 0 ? Math.max(c / MAX * 100, 2) : 0) + '%';
+    b.setAttribute('aria-label', c + ' trades');
+    hist.appendChild(b);
+  });
+</script>
