@@ -39,6 +39,16 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   paper forward-test 进行中，改动 = 测试作废（paper/FREEZE_V2.md）。改参数做实验用副本或策略参数文件。
 - forward-test 期间只记录不改参数；判据与周期见 `user_data/paper/FREEZE_V2.md`。
 
+## Git 提交纪律（用户已明确授权，2026-08-28）
+
+- **每完成一个可独立描述的改动单元（bug 修复 / 新脚本工具 / 文档更新 / 配置变更 / 数据更新），主动 commit + push，不要等用户提醒。**
+- 粒度：逻辑相关的改动一个提交，不同主题拆开（例：数据入库与研究修复分开提交）。
+- 信息：中文为主，首行说清"做了什么 + 为什么"，与仓库现有提交风格一致。
+- 推送目标：`origin/develop`（默认分支）。SSH 直连可用，无需代理。
+- 边界：不提交未完成/破坏状态的中间态；提交前 `git status` 过一眼，确认没有把密钥、sqlite、日志、
+  来源不明的改动卷进去（遇到不明改动先问，不要顺手提交）。
+- 授权范围：仅本仓库（Sieata/freqtrade develop 分支）。
+
 ## 高频坑速记
 
 - `enter_tag` 列名必须准确，且只能在 `populate_entry_trend` 里赋值（`advise_entry` 会先清空该列）。
