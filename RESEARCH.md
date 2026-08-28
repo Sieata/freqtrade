@@ -311,4 +311,73 @@ freqtrade backtesting --config user_data/config_bigmove.json \
 
 ---
 
+## 十一、新策略研究：FundingSqueezeV1（进行中）+ 三个方向否决（2026-08-29）
+
+> 目标：扩充策略库。按第〇节标准流程执行，全部调参只用 TEST。研究脚本：
+> `user_data/scripts/newedge_phase1.py`（Phase1 信号统计）、`fsq_batch.py`（A/B 网格）。
+
+### 11.1 Phase1 三假设事件研究（TEST 20220101-20240828，扣 0.1% 摩擦，10 品种 core∩data）
+
+| 假设 | 最优形态 | 结果 | 判定 |
+|---|---|---|---|
+| **H1 资金费极端负做多** | fund≤自身90d p2分位，hold 72h | n=3011 胜率 57.0% 均值 **+0.913%**/笔（基线 -0.078%），**品种净正 10/10，逐年全正**（+0.52/+0.68/+1.04%） | ✅ 建策略 |
+| H1b 资金费极端正做多 | fund≥p98(90d) | 全期均值 -0.18%，2022 显著负（杠杆拥挤=危险而非燃料，与 S11 做空侧证伪互证） | ❌ |
+| H2 波动率压缩后突破（1d） | squeeze+20日新高 | 对照裸突破同样强 → squeeze 无增益；hold≥10d 在 2022 全负需 MA200 过滤 → 与 BigMove 同地盘 | ❌ |
+| H3 震荡市均值回归（4h 下轨回收×weekday） | 回收×跌>2%，hold 24h | 最好也只 +0.586%/笔，2022 接近零——NightCrash 同病（利润太薄），且与 WeekendReverse 入场同源 | ❌ |
+
+机制与新颖性：H1 用的是**衍生品持仓信息**（funding），现有 4 策略只用价格/成交量；负费率=空头拥挤付费，
+做多还能**收**资金费（freqtrade 已建模，Phase1 未计入，属保守偏差）。BNB 费率被钳制频繁打 0 是真实机制
+（API 对照确认，见数据 commit），其 p2 分位由非零真实值构成，信号不受污染。
+
+### 11.2 原型回测（freqtrade 真实执行，core 11 品种 × TEST，独立口径 $1,000/笔）
+
+**CORE×TEST：457 笔 / +$3,460 / 胜率 54.7% / PF 1.29 / 回撤 7.6% / 盈利品种 9/10（仅 AVAX -248），
+逐年 +839/+1,234/+1,391（2022 熊市年为正——与 BigMove 互补；BigMove 亏损的震荡年待 VAL 检验）。**
+每笔均值 +0.76% vs Phase1 预期 +0.91%，差额来自 -10% 止损缺口与"状态过渡才入场"的保守化。门禁全过。
+
+实现（FundingSqueezeV1）：4h；入场=费率进入自身 90d p2 分位的**过渡K线**；-10% 固定止损；
+custom_exit 持有 72h；无 ROI/尾随。funding 取数 `dp.historic_ohlcv(pair,"1h",candle_type="funding_rate")`
++ **必须过滤 `open!=0`**（freqtrade 对非结算小时填 0 而非前值，否则信号被零值污染）。
+
+### 11.3 A/B 过拟合检测（部分完成，形态健康）
+
+`fsq_batch.py` 网格 14 组合已跑 5 个（日志 `user_data/reports/logs/fsq_batch_20260829.log`）：
+
+| 组合 | trades | 利润$ | PF | 品种正 | 逐年 |
+|---|---|---|---|---|---|
+| 盲参 q=0.10 h=96 | 887 | +2,843 | 1.10 | 7/10 | +33/+2,821/-10 |
+| 盲参 q=0.05 h=24 | 980 | +3,571 | 1.23 | 8/10 | 全正 |
+| q=0.01 h=72 | 309 | +3,349 | 1.41 | 9/10 | 全正 |
+| q=0.02 h=48 | 510 | +2,691 | 1.24 | 9/10 | 全正 |
+| **默认 q=0.02 h=72** | 457 | +3,464 | 1.29 | 9/10 | 全正 |
+
+**A 盲参通过、B 初步通过**（参数面平滑无尖峰，PF 1.10-1.41）。C 逐年等价证据（参数不按年重选、
+逐年独立为正）在全部 5 组合成立。剩余 9 组合未跑（用户中止，待其他设备续跑）。
+
+### 11.4 ⚠️ 未完成清单（换设备续做，按序执行）
+
+```bash
+# 1) 补完 A/B 网格（剩 9 组合，约 30 分钟；日志可续写）
+.venv/bin/python user_data/scripts/fsq_batch.py
+#    判定：网格基本全盈利 + 无尖峰 + 逐年为正 → A/B 正式通过
+
+# 2) 标准验证（VAL 尚未跑过，一次性纪律仍有效——跑之前不要再用 VAL 做任何对比）
+.venv/bin/python user_data/scripts/validate_strategy.py --strategy FundingSqueezeV1
+#    门禁：TEST 利润>0 / PF>1.0 / ≥80% 品种；VAL 同上 + dd≤30%
+
+# 3) 若全过 → 定版候选；进 paper 前必须先验证 live/paper 的 funding 取数
+#    （dp.historic_ohlcv 仅回测可用；informative_pairs 已声明 ("PAIR","1h","funding_rate")，需实测）
+
+# 4) （可选）补满池数据后重跑完整池验证
+./ensure-data.sh user_data/universe/pairs_core.txt   # funding 老数据走 import_funding_vision.py
+
+# 5) 定版后：更新本节状态 + STRATEGY_WORKFLOW 检测记录模板 + paper 判据入 FREEZE 文档
+```
+
+注意事项：① VAL 一次跑过后不得再改任何参数重跑（否则作废重来）；② Volume 池当前仅 9 品种有数据，
+泛化结论受限于交集；③ 该策略与 V2 反向互补（V2 做周末反弹、本策略吃资金费极值后的漂移），
+组合叠加价值待两者都定版后再评估。
+
+---
+
 > 2026-08-28 文档同步：GitHub 推送验证。

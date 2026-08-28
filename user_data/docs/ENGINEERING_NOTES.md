@@ -83,6 +83,14 @@
 12. **固定每笔本金的池测试两个配置项缺一不可**：`--stake-amount 1000` + `--dry-run-wallet`
     ≥ 本金×最大并发仓×1.2。只设前者会报 "Starting balance (990 USDT) is smaller than stake_amount"
     配置错误（dry_run_wallet 默认 1000 × tradable_balance_ratio 0.99）。
+13. **`use_exit_signal=False` 会连 `custom_exit` 一起禁用**（2026-08-29，FundingSqueezeV1 踩坑）：
+    `interface.py should_exit()` 里 custom_exit 整个包在 `if self.use_exit_signal:` 内。症状极具迷惑性：
+    回测不报错，但"持有 N 天定期离场"完全不生效，仓位被拖到回测结束 force_exit（单笔 +767% 的假
+    赢家就是这么来的，胜率/收益全失真）。要用 custom_exit 就保持 use_exit_signal=True，
+    离场信号列留空即可（V1 的"exit 信号阻挡入场"是 populate_exit_trend 里写了列才会发生）。
+14. **策略取 funding 序列必须过滤 `open != 0`**：freqtrade 加载 1h funding feather 时
+    fill_missing 会把非结算小时补成 0（不是复制前值），直接用会把"结算间隔"当成"费率为 0"；
+    BNB 因费率被钳制、约半数真实结算就是 0，被过滤后由前值代替——对分位数信号影响极小但要知道。
 
 ---
 
