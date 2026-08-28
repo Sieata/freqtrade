@@ -146,7 +146,7 @@ CAGR 32.7% | 夏普 1.30 | 利润因子 1.86
 
 ## 五、失败记录
 
-- **单品种策略（ETHShortV1_overfit/DOGEDualV1）**：单标的优秀，换品种全崩 → 过拟合。ETHShortV1_overfit 保留作为对照案例
+- **单品种策略（ETHShortV1_overfit/DOGEDualV1）**：单标的优秀，换品种全崩 → 过拟合。源码已于 2026-08-28 删除，测量记录见 `user_data/docs/STRATEGY_LIBRARY.md`
 - **凌晨闪崩策略（NightCrash）**：统计优势存在但利润太薄，无法对抗交易摩擦
 - **FreqAI 机器学习**：训练数据不足，学不到有效模式
 - **做空暴涨**：加密市场涨了继续涨，做空暴涨没有普适性
