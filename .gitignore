@@ -26,6 +26,15 @@ user_data/notebooks/*
 user_data/backtest_results/*
 !user_data/backtest_results/*.html
 !user_data/docs/
+!user_data/config_paper_v2.json
+# K线/资金费数据随仓库分发（约 23MB，见 user_data/data/README.md），
+# 新机器 clone 后可离线回测，ensure-data.sh 只做增量
+!user_data/data/
+user_data/data/*
+!user_data/data/README.md
+!user_data/data/binance/
+user_data/data/binance/*
+!user_data/data/binance/futures/
 freqtrade-plot.html
 freqtrade-profit-plot.html
 freqtrade/rpc/api_server/ui/*
