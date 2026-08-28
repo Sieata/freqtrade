@@ -75,6 +75,14 @@
    uvicorn.error 开头的行是日志器名不是错误。
 10. **本地结果 zip 的关键指标**（bt_summary.py 读取）：`total_trades / profit_total_abs / winrate /
     profit_factor / max_relative_drawdown`；zip 内 trades 列表可用于独立口径复核，无需重跑。
+11. **离线回测仍要联网**（2026-08-29，validate_strategy.py 踩坑）：backtesting 启动时会
+    `reload_markets`（GET api.binance.com exchangeInfo），网络不通直接 exit 2
+    `TemporaryError`。且 freqtrade 的市场加载走 aiohttp —— **aiohttp 不认 shell 代理环境变量**，
+    必须 config 里 `ccxt_config.aiohttp_trust_env: true`（config_paper_v2 早已加，
+    2026-08-29 补进 config_perpetual / config_bigmove）。两个坑叠加时症状是"回测还没开始就 TemporaryError"。
+12. **固定每笔本金的池测试两个配置项缺一不可**：`--stake-amount 1000` + `--dry-run-wallet`
+    ≥ 本金×最大并发仓×1.2。只设前者会报 "Starting balance (990 USDT) is smaller than stake_amount"
+    配置错误（dry_run_wallet 默认 1000 × tradable_balance_ratio 0.99）。
 
 ---
 

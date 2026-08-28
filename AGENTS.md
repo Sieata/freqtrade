@@ -28,10 +28,25 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/bt_summary.py <result.zip>
 .venv/bin/python user_data/scripts/pool_review.py <result.zip> --worst 10
 
+# 标准化验证（2026-08-28 起新研究强制，口径详见 STRATEGY_WORKFLOW.md 第〇节）
+.venv/bin/python user_data/scripts/time_splits.py                    # 打印冻结的 TEST/VAL timerange
+.venv/bin/python user_data/scripts/make_universe.py                  # 重生成币池快照 core50/volume30（需代理）
+.venv/bin/python user_data/scripts/validate_strategy.py --strategy X # 一键 TEST+VAL × core+volume + 门禁 + 报告
+./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
+
 # paper forward-test（V2，进行中）
 ./user_data/scripts/paper_start.sh        # 启动（内置 SHA 校验，不匹配拒绝启动）
 .venv/bin/python user_data/scripts/paper_status.py   # 周记录
 ```
+
+## 研究纪律（2026-08-28 起新研究强制）
+
+- **时间切分冻结**（`user_data/universe/splits.json`）：调参/滚动只准用 TEST `20220101-20240828`；
+  VAL `20240828-` 定版候选只跑一次，跑过又改参 = 作废重来；2021 数据只作暖机；重切要改文件+RESEARCH.md 记录。
+- **币池分层**（`user_data/universe/pairs_*.txt`）：实盘/paper 只允许 CORE（市值 Top50）；
+  VOLUME（24h 量 Top30）只做泛化测试、禁实盘；双池同参都过才算普适。池文件是生成日快照。
+- 泛化验证一律独立口径（固定 $1,000/笔，validate_strategy.py 内置）；复利口径只用于定版后单池回测。
+- VAL 报告必看单年集中度，防新币单年 pump 假 edge（ZEC/BANK 教训）。
 
 ## 禁改 / 高危
 
@@ -57,4 +72,8 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - 文档"钱包口径回撤" = `max_relative_drawdown`。
 - dry-run DB 路径要显式配置（`db_url`），默认落在 CWD。
 - 回测不含滑点；摩擦测试用 `--fee` 覆盖。
+- 回测启动也要访问 binance（reload_markets）：aiohttp 不认 shell 代理变量，回测 config 必须
+  `ccxt_config.aiohttp_trust_env: true`（config_perpetual/bigmove 已加），且 shell 带 https_proxy。
+- 固定每笔本金的池测试要 `--stake-amount` + `--dry-run-wallet`（≥ 本金×并发仓×1.2），否则
+  "Starting balance smaller than stake_amount" 配置错误。
 - freqtrade 日志不打印策略 SHA，冻结校验靠 `shasum -a 256` 与 `user_data/paper/frozen_*.py` 比对。
