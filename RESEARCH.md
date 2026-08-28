@@ -204,6 +204,8 @@ freqtrade backtesting --config user_data/config_bigmove.json \
 
 ### 环境与工具（Mac 端从零搭建）
 
+> 工程坑的完整记录（症状→根因→解法）：`user_data/docs/ENGINEERING_NOTES.md`；会话速查：`AGENTS.md`。
+
 - `uv venv .venv --python 3.12` + editable 安装本仓库 freqtrade 2026.8-dev；TA-Lib 0.7.1 用 cp312 macosx_13 wheel 解包（本机 macOS 12 无匹配 wheel）；cryptography 50.0.0 源码编译（配用户目录 OpenSSL 3.5.4，ccxt≥49 依赖且 49+ 无 x86_64 macOS wheel）；bottleneck/technical 无引用，跳过。
 - binance API 直连不通，统一走系统代理 `127.0.0.1:7897`（`ensure-data.sh` / `paper_start.sh` 内置；paper 配置加 `aiohttp_trust_env: true`）。funding 历史被 WAF 403 拦截，改从 data.binance.vision 月度包补齐（`user_data/scripts/import_funding_vision.py`），8 月增量走 API 近期时间戳（403 只针对 2021 老起点）。
 - 数据：14 品种 4h/1d K线 + funding + mark，2021-01-01 起，接缝完整。
