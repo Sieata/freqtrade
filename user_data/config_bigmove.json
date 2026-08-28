@@ -38,7 +38,8 @@
         "ccxt_config": {
             "options": {
                 "defaultType": "future"
-            }
+            },
+            "aiohttp_trust_env": true
         },
         "ccxt_async_config": {},
         "pair_whitelist": [

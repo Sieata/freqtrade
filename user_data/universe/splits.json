@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "frozen_on": "2026-08-28",
+  "rule": "数据从 2021-01-01 起，2021 全年只作指标暖机不计入可交易区间（暖机口径教训见 user_data/paper/FREEZE_V2.md 第八节）；最近 2 年为验证集，其余为测试集。端点语义：freqtrade timerange 的 stop 为含端（<= stopdt），TEST 与 VAL 共享 2024-08-28 00:00 一根边界 K，影响可忽略。",
+  "data_start": "20210101",
+  "test_start": "20220101",
+  "split_date": "20240828",
+  "test_timerange": "20220101-20240828",
+  "val_timerange": "20240828-",
+  "resplit_policy": "默认冻结，不随时间滚动。确需重切（如满 2 年整体平移一次）时：改本文件 + version+1 + 在 RESEARCH.md 记录，此后所有旧结论标注所用切分版本。重切后验证集重新归零，此前跑过的验证结果作废。"
+}

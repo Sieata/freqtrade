@@ -1,0 +1,35 @@
+# VOLUME 泛化测试池 —— 币安 USDT-M 永续 · 24h 成交量 Top30
+# 生成: 2026-08-29 | 数据源: ccxt binanceusdm 24h ticker (quoteVolume)
+# 规则: 按 24h USDT 成交量降序取前 30；剔除稳定币/封装币/商品代币
+# 用途: 仅用于泛化能力测试，禁止直接实盘。今日热门榜有幸存者偏差——单年集中度必看（validate_strategy.py 报告）
+#
+BTC/USDT:USDT # rank=1 vol24h=$15.84B onboard=2019-09-08
+ETH/USDT:USDT # rank=2 vol24h=$10.00B onboard=2019-11-27
+SOL/USDT:USDT # rank=3 vol24h=$4.27B onboard=2020-09-14
+XRP/USDT:USDT # rank=4 vol24h=$1.47B onboard=2020-01-06
+ZEC/USDT:USDT # rank=5 vol24h=$1.17B onboard=2020-02-05
+HYPE/USDT:USDT # rank=6 vol24h=$1.15B onboard=2025-05-30
+TRUMP/USDT:USDT # rank=7 vol24h=$1.09B onboard=2025-01-18
+ENA/USDT:USDT # rank=8 vol24h=$900.42M onboard=2024-04-02
+DOGE/USDT:USDT # rank=9 vol24h=$455.83M onboard=2020-07-10
+BNB/USDT:USDT # rank=10 vol24h=$345.16M onboard=2020-02-10
+BTR/USDT:USDT # rank=11 vol24h=$283.24M onboard=2025-08-27
+HEMI/USDT:USDT # rank=12 vol24h=$282.23M onboard=2025-08-29
+龙虾/USDT:USDT # rank=13 vol24h=$281.10M onboard=2026-03-11
+PUMP/USDT:USDT # rank=14 vol24h=$276.99M onboard=2025-07-10
+SUI/USDT:USDT # rank=15 vol24h=$271.26M onboard=2023-05-03
+1000PEPE/USDT:USDT # rank=16 vol24h=$249.24M onboard=2023-05-05
+MOVR/USDT:USDT # rank=17 vol24h=$216.99M onboard=2023-12-26
+WLD/USDT:USDT # rank=18 vol24h=$186.71M onboard=2023-07-24
+ADA/USDT:USDT # rank=19 vol24h=$170.04M onboard=2020-01-31
+UNI/USDT:USDT # rank=20 vol24h=$157.71M onboard=2020-09-18
+TAO/USDT:USDT # rank=21 vol24h=$155.03M onboard=2024-04-11
+ONG/USDT:USDT # rank=22 vol24h=$145.72M onboard=2023-11-27
+LINK/USDT:USDT # rank=23 vol24h=$142.55M onboard=2020-01-17
+PROM/USDT:USDT # rank=24 vol24h=$135.25M onboard=2025-01-15
+AKE/USDT:USDT # rank=25 vol24h=$133.78M onboard=2025-09-26
+NEAR/USDT:USDT # rank=26 vol24h=$125.55M onboard=2020-10-15
+AAVE/USDT:USDT # rank=27 vol24h=$117.86M onboard=2020-10-16
+MAGMA/USDT:USDT # rank=28 vol24h=$108.70M onboard=2025-12-31
+TUT/USDT:USDT # rank=29 vol24h=$91.86M onboard=2025-03-20
+BMT/USDT:USDT # rank=30 vol24h=$90.28M onboard=2025-03-17

@@ -1,0 +1,55 @@
+# CORE 实盘池 —— 币安 USDT-M 永续 · 市值 Top50
+# 生成: 2026-08-29 | 数据源: CoinGecko 市值榜 + ccxt binanceusdm 合约表
+# 规则: CoinGecko 市值前 250 名中在币安有 USDT 永续者，按市值降序取前 50；剔除稳定币/封装币/商品代币
+# 用途: 实盘/paper 只允许跑此池内品种。重生成: make_universe.py --core-only（重生成需在 RESEARCH.md 记录）
+#
+BTC/USDT:USDT # rank=1 mcap=$1.57T onboard=2019-09-08
+ETH/USDT:USDT # rank=2 mcap=$296.58B onboard=2019-11-27
+BNB/USDT:USDT # rank=3 mcap=$92.62B onboard=2020-02-10
+XRP/USDT:USDT # rank=4 mcap=$88.24B onboard=2020-01-06
+SOL/USDT:USDT # rank=5 mcap=$61.41B onboard=2020-09-14
+TRX/USDT:USDT # rank=6 mcap=$32.24B onboard=2020-01-15
+HYPE/USDT:USDT # rank=7 mcap=$18.16B onboard=2025-05-30
+ZEC/USDT:USDT # rank=8 mcap=$13.63B onboard=2020-02-05
+DOGE/USDT:USDT # rank=9 mcap=$13.35B onboard=2020-07-10
+XMR/USDT:USDT # rank=10 mcap=$8.77B onboard=2020-02-03
+LINK/USDT:USDT # rank=11 mcap=$8.62B onboard=2020-01-17
+ADA/USDT:USDT # rank=12 mcap=$7.64B onboard=2020-01-31
+XLM/USDT:USDT # rank=13 mcap=$6.22B onboard=2020-01-20
+BCH/USDT:USDT # rank=14 mcap=$5.00B onboard=2019-12-19
+CC/USDT:USDT # rank=15 mcap=$4.34B onboard=2025-10-31
+GRAM/USDT:USDT # rank=16 mcap=$3.80B onboard=2026-07-02
+LTC/USDT:USDT # rank=17 mcap=$3.77B onboard=2020-01-09
+HBAR/USDT:USDT # rank=18 mcap=$3.28B onboard=2021-03-17
+AVAX/USDT:USDT # rank=19 mcap=$3.16B onboard=2020-09-23
+SUI/USDT:USDT # rank=20 mcap=$3.06B onboard=2023-05-03
+UNI/USDT:USDT # rank=21 mcap=$2.78B onboard=2020-09-18
+NEAR/USDT:USDT # rank=22 mcap=$2.39B onboard=2020-10-15
+TAO/USDT:USDT # rank=23 mcap=$2.32B onboard=2024-04-11
+M/USDT:USDT # rank=24 mcap=$2.24B onboard=2025-07-07
+AAVE/USDT:USDT # rank=25 mcap=$1.89B onboard=2020-10-16
+PUMP/USDT:USDT # rank=26 mcap=$1.87B onboard=2025-07-10
+ASTER/USDT:USDT # rank=27 mcap=$1.84B onboard=2025-09-19
+WLFI/USDT:USDT # rank=28 mcap=$1.83B onboard=2025-08-23
+ONDO/USDT:USDT # rank=29 mcap=$1.75B onboard=2024-01-20
+ENA/USDT:USDT # rank=30 mcap=$1.65B onboard=2024-04-02
+MORPHO/USDT:USDT # rank=31 mcap=$1.63B onboard=2024-11-27
+SKY/USDT:USDT # rank=32 mcap=$1.58B onboard=2025-09-09
+DOT/USDT:USDT # rank=33 mcap=$1.45B onboard=2020-08-22
+WLD/USDT:USDT # rank=34 mcap=$1.41B onboard=2023-07-24
+ICP/USDT:USDT # rank=35 mcap=$1.32B onboard=2021-07-30
+ETC/USDT:USDT # rank=36 mcap=$1.19B onboard=2020-01-16
+POL/USDT:USDT # rank=37 mcap=$1.14B onboard=2024-09-13
+BTW/USDT:USDT # rank=38 mcap=$1.09B onboard=2026-06-04
+QNT/USDT:USDT # rank=39 mcap=$890.41M onboard=2022-10-18
+LIT/USDT:USDT # rank=40 mcap=$850.72M onboard=2025-12-23
+VVV/USDT:USDT # rank=41 mcap=$805.95M onboard=2025-01-29
+JST/USDT:USDT # rank=42 mcap=$795.09M onboard=2025-04-28
+ALGO/USDT:USDT # rank=43 mcap=$790.49M onboard=2020-06-16
+KAS/USDT:USDT # rank=44 mcap=$779.83M onboard=2023-11-17
+ATOM/USDT:USDT # rank=45 mcap=$779.09M onboard=2020-02-07
+RENDER/USDT:USDT # rank=46 mcap=$757.17M onboard=2024-07-26
+JUP/USDT:USDT # rank=47 mcap=$754.40M onboard=2024-01-31
+TRUMP/USDT:USDT # rank=48 mcap=$682.03M onboard=2025-01-18
+STABLE/USDT:USDT # rank=49 mcap=$671.46M onboard=2025-11-06
+ARB/USDT:USDT # rank=50 mcap=$588.04M onboard=2023-03-23
