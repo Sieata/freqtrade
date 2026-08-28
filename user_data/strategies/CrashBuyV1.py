@@ -62,13 +62,19 @@ class CrashBuyV1(IStrategy):
         df["long_entry"] = (mid_crash | big_crash) & (df["volume"] > 0)
 
         # B: 分级仓位标记（9-12% = 半仓, >12% = 满仓）
-        df["entry_tag"] = "default"
-        df.loc[mid_crash & (df["volume"] > 0), "entry_tag"] = "half"
-        df.loc[big_crash & (df["volume"] > 0), "entry_tag"] = "full"
+        # 注意: enter_tag 必须在 populate_entry_trend 内赋值 —— advise_entry 会先把
+        # enter_tag 列清空(interface.py), 在 populate_indicators 里设置会被抹掉。
+        # 这里只留中间列, 2026-08-28 修复前(列名错+位置错)所有入场实际都是满仓
+        df["crash_level"] = "default"
+        df.loc[mid_crash & (df["volume"] > 0), "crash_level"] = "half"
+        df.loc[big_crash & (df["volume"] > 0), "crash_level"] = "full"
         return df
 
     def populate_entry_trend(self, df, meta):
         df.loc[df["long_entry"], "enter_long"] = 1
+        # 分级仓位: enter_tag 须在此处赋值(见 populate_indicators 注释)
+        df.loc[df["long_entry"] & (df["crash_level"] == "half"), "enter_tag"] = "half"
+        df.loc[df["long_entry"] & (df["crash_level"] == "full"), "enter_tag"] = "full"
         return df
 
     def populate_exit_trend(self, df, meta):

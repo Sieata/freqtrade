@@ -7,13 +7,23 @@ import os, sqlite3, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DB = os.path.join(ROOT, "user_data", "tradesv3.dryrun.sqlite")
 
-# Backtest baseline (frozen in FREEZE.md; invalid if strategy changes)
-BASELINE = {
-    "profit_abs": 206386,   # full-period compound $1000 -> $207,386
-    "winrate": 91.4,
-    "dd": 20.5,
-    "trades": 478,
-    "start_wallet": 1000,
+# Backtest baselines (frozen in paper/FREEZE.md & FREEZE_V2.md; invalid if strategy changes).
+# V2 uses the warmup-complete local rerun figure (FREEZE_V2.md §8: 537 trades / +$375,330).
+BASELINES = {
+    "WeekendReverseV1": {
+        "profit_abs": 206386,   # full-period compound $1000 -> $207,386
+        "winrate": 91.4,
+        "dd": 20.5,
+        "trades": 478,
+        "start_wallet": 1000,
+    },
+    "WeekendReverseV2": {
+        "profit_abs": 375330,   # warmup-complete compound $1000 -> $376,330
+        "winrate": 90.6,
+        "dd": 32.1,
+        "trades": 537,
+        "start_wallet": 1000,
+    },
 }
 
 # Pre-defined forward-test criteria (green/red lights)
@@ -46,6 +56,12 @@ def max_drawdown(equity):
     return mdd
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--strategy", default="WeekendReverseV2", choices=sorted(BASELINES))
+    args = ap.parse_args()
+    BASELINE = BASELINES[args.strategy]
+
     rows, _ = load_closed()
     if rows is None:
         print("X no dry-run DB found (forward-test not started, or nothing closed yet)")
@@ -74,7 +90,7 @@ def main():
     mdd = max_drawdown(equity)
 
     print("=" * 66)
-    print("WeekendReverseV1  forward-test report (paper / dry-run)")
+    print(f"{args.strategy}  forward-test report (paper / dry-run)")
     print("=" * 66)
     print(f"DB: {DB}")
     print(f"Period: {t0}  ~  {t1}")

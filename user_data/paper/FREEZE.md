@@ -10,9 +10,11 @@
 | 冻结日期 | 2026-08-13 |
 | 策略文件 | `user_data/strategies/WeekendReverseV1.py` |
 | 冻结快照 | `user_data/paper/frozen_WeekendReverseV1.py`（不可变备份） |
-| 策略 SHA256 | `77cb37847c37e5769164da2e92af30ce84d458b0d0341b233d2d478c17a67df4` |
+| 策略 SHA256 | `119407ff70a85a1f09dfb4aab830673bf3e7328d1b1b033e3379671a4062d707` |
 | 交易模式 | paper trading（dry_run=true，模拟下单，不动真钱） |
 | 起始资金 | $1,000（`dry_run_wallet`，与回测同口径） |
+
+> 勘误（2026-08-28）：本表原记 SHA `77cb3784…7df4` 为 08-13 当天最终优化（尾随激活 1.2%→1.5%、去 EMA 离场）**之前**的旧版本指纹；实际冻结快照与现行策略文件一致，SHA 为 `119407ff…2d707`。forward-test 此前从未实际启动（本机无日志/无交易记录），不受影响。正式前向测试已改由 **WeekendReverseV2 单策略**承担（避免近双胞胎策略双开分裂样本），见 `RESEARCH.md` 第九节。
 
 **规则：forward-test 期间，若 `WeekendReverseV1.py` 被任何方式改动（SHA256 变化），本次 forward-test 作废，必须重来。** 启动时核对日志开头的策略 SHA 与上表一致。
 
