@@ -61,5 +61,7 @@
 | 项目 | 状态 |
 |---|---|
 | WeekendReverseV1 | 已冻结，paper forward-test 进行中（`user_data/paper/FREEZE.md` 记录判据：胜率 ≥70%、回撤 ≤30%、≥20 笔、利润 >0） |
+| WeekendReverseV2 | 已冻结（2026-08-16） |
+| 数据刷新复跑（2026-08-28） | 数据更新至 08-28：V2 全期 553 笔 / +$525,857（PF 2.10），冻结后新窗口 16 笔 +$150,527 为正；冻结基线差异系暖机口径（详见 `paper/FREEZE_V2.md` 第八节） |
 | BigMoveV1 / CrashBuyV1 | 已定版，未实盘 |
 | 研究文档 | `RESEARCH.md`（结论+失败记录）、`STRATEGY_WORKFLOW.md`（研发流程） |
