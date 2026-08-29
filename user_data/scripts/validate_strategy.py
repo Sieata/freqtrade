@@ -246,6 +246,9 @@ def fmt_table(pairs, years, cell, cnt, wins):
     lines.append("-" * len(hdr))
     lines.append(f"{'TOTAL':<10}" + "".join(f"{row_total[y]:>11,.0f}" for y in years)
                  + f"{sum(row_total.values()):>11,.0f}")
+    # 逐年收益率（2026-08-29 口径：每年重置 $1,000 本金，当年利润 ÷ 1000 = 当年收益率%）
+    lines.append(f"{'TOTAL%':<10}" + "".join(f"{row_total[y] / STAKE * 100:>10.1f}%" for y in years)
+                 + f"{sum(row_total.values()) / STAKE * 100:>10.1f}%")
     return "\n".join(lines)
 
 
@@ -307,11 +310,16 @@ def main():
                f"占仓口径 {portfolio['ann_deployed'] * 100:+.1f}%/年"
                f"（平均并发 {portfolio['avg_conc']:.1f} 仓，{portfolio['years']:.2f} 年）"
                if "ann_wallet" in portfolio else "年化: 无交易")
+        pairs_list, years_list, cell_map = table[0], table[1], table[2]
+        yearly_pct = " ".join(
+            f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / STAKE * 100:+.1f}%"
+            for y in years_list)
         print(f"\n=== {pool.upper()} × {split_name} ({tr}) ===")
         print(f"trades={portfolio['trades']}  profit=${portfolio['profit_abs']:,.0f}  "
               f"win%={portfolio['win_rate'] * 100:.1f}  PF={portfolio['pf']:.2f}  "
               f"dd={portfolio['dd'] * 100:.1f}%  盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}")
         print(ann)
+        print(f"逐年收益率（每年重置 $1,000 本金，当年利润÷1000）: {yearly_pct}")
         print(f"独立口径品种×年度（$1,000/笔）:")
         print(fmt_table(*table))
         for name, verdict, detail in gates:
@@ -328,6 +336,7 @@ def main():
                    f"win%={portfolio['win_rate'] * 100:.1f} PF={portfolio['pf']:.2f} "
                    f"dd={portfolio['dd'] * 100:.1f}% 盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}",
                    f"**{ann}**",
+                   f"逐年收益率（每年重置 $1,000 本金）: {yearly_pct}",
                    "",
                    "```", fmt_table(*table), "```", "", "| 门禁 | 结果 | 说明 |", "|---|---|---|"]
         report += [f"| {name} | {verdict} | {detail} |" for name, verdict, detail in gates]
