@@ -40,6 +40,12 @@
    （config_paper_v2.json 已加）。漏了第二条的表现：机器人能启动但永远拉不到 K 线。
 3. **binance WAF 403 规律**：`/fapi/v1/fundingRate` 带 2021 年老 `startTime` 的查询稳定 403，
    近期 `startTime` 正常。所以补历史数据的组合拳是：**历史走 vision 桶 + 增量走 API**。
+   补充（2026-08-29，Windows 设备 60 品种批量实测）：**突发大批量请求会把 funding 端点整体临时封锁
+   几分钟**——期间连近期 `startTime` 的增量也 403（K 线/mark 不受影响）；停几分钟再跑小批量增量
+   即可全部通过，无需换代理或直连。vision 导入还会漏 **vision 月度 zip 本身缺文件**的月份
+   （实例：BNB 2025-11 整月无 zip → feather 空洞 30 天，API 核实有数据后用
+   `/fapi/v1/fundingRate` 单独补齐；验证方法见下方"数据完整性矩阵"惯例：按品种检查 funding
+   最大相邻间隔 >3 天即报警）。
 4. **data.binance.vision 直连可达（不需要代理！）**，月度包齐全：
    `data/futures/um/monthly/{klines,fundingRate,markPriceKlines}/<SYMBOL>/<SYMBOL>-<period>.zip`。
    funding 月度包 CSV 列：`calc_time, funding_interval_hours, last_funding_rate`。

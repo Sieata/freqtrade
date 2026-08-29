@@ -12,7 +12,7 @@
 ## 网络（国内网络，Clash 代理）
 
 - binance API 需代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`（shell 环境变量默认没有）。
-- WAF 403 只拦 funding 的老 startTime 查询：历史从 data.binance.vision 补（`user_data/scripts/import_funding_vision.py`，直连无需代理），近期增量走 API。
+- WAF 403 主要拦 funding 的老 startTime 查询：历史从 data.binance.vision 补（`user_data/scripts/import_funding_vision.py`，直连无需代理），近期增量走 API。批量拉取时 funding 端点会被整体临时封锁几分钟（连近期增量也 403），等几分钟小批量重试即可；vision 无 funding 每日包，个别月份 zip 缺件会留空洞（BNB 2025-11 先例），完整性检查看相邻间隔 >3 天。
 - GitHub SSH 22 直连正常，push 不需要代理。
 - 数据更新：`./ensure-data.sh`（增量；FT_PROXY 环境变量可覆盖代理）。
 

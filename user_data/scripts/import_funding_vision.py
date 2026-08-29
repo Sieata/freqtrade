@@ -1,7 +1,11 @@
-"""Import funding_rate history from data.binance.vision monthly/daily zips → freqtrade feather.
+"""Import funding_rate history from data.binance.vision monthly zips → freqtrade feather.
 
 用于 fapi /fapi/v1/fundingRate 端点被 WAF 403 拦截时补数据（K 线与 mark 已由 API 下载）。
-vision 桶直连可用（无需代理）。
+vision 桶直连可用（无需代理）。注意：
+  - vision 只有 fundingRate 的 monthly 包，daily 包全部 404 → 导入止于最后一个完整月，
+    当月增量靠 API（重跑 ensure-data.sh）。
+  - 个别月份 zip 缺件会留空洞（实例：BNB 2025-11），用 /fapi/v1/fundingRate 按 startTime
+    单独补齐；完整性检查惯例：funding 相邻间隔 >3 天即报警（ENGINEERING_NOTES 一.3）。
 
 用法: .venv/bin/python user_data/scripts/import_funding_vision.py [PAIR...]
 缺省处理所有缺少 funding_rate feather 的品种。
@@ -10,7 +14,7 @@ import io
 import os
 import sys
 import zipfile
-from datetime import date, timedelta
+from datetime import date
 from urllib.request import urlopen
 
 import pandas as pd
@@ -21,7 +25,14 @@ ALL_PAIRS = ["BTC", "ETH", "SOL", "XRP", "BNB", "ZEC", "HOME", "BANK", "CYS", "H
 SKIP = {"ta-lib"}  # noqa
 
 
-def months(start=(2021, 1), end=(2026, 7)):
+def months(start=(2021, 1), end=None):
+    """月度序列；end 缺省 = 上一个完整月（vision 当月包不存在）。"""
+    if end is None:
+        t = date.today()
+        y, m = t.year, t.month - 1
+        if m == 0:
+            y, m = y - 1, 12
+        end = (y, m)
     y, m = start
     while (y, m) <= end:
         yield f"{y}-{m:02d}"
@@ -54,16 +65,7 @@ def build(symbol):
             n_miss += 1
             continue
         recs.append(rows_from_zip(blob))
-    # 当月用 daily 文件补齐
-    d = date(2026, 8, 1)
-    while d <= date(2026, 8, 28):
-        ds = d.strftime("%Y-%m-%d")
-        blob = fetch(f"{BASE}/daily/fundingRate/{symbol}/{symbol}-fundingRate-{ds}.zip")
-        if blob is not None:
-            recs.append(rows_from_zip(blob))
-        else:
-            n_miss += 1
-        d += timedelta(days=1)
+    # vision 无 fundingRate daily 包（404），导入止于最后一个完整月；当月增量走 API
 
     if not recs:
         return None

@@ -17,7 +17,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Windows(Git Bash) 的 venv 布局是 Scripts/python.exe，Unix 是 bin/python
 PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
 FT_PROXY="${FT_PROXY:-http://127.0.0.1:7897}"
 
 if [ ! -x "$PY" ]; then
