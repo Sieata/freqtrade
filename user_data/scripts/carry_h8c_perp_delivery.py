@@ -172,6 +172,52 @@ def fund_contrib(s, entry_ts, expiry_ts, P0, perp, rates):
     return float((s * r * P_i / P0).sum())
 
 
+def scan_events(expiries_list, perp, rates, entry_after=None):
+    """按预注册规则扫事件；entry_after 用于把入场限制在某时点之后（描述区模拟）。"""
+    events = []
+    for e in expiries_list:
+        sym = f"{SYM}USDT_{e.strftime('%y%m%d')}"
+        expiry_ts = pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8)
+        df = build_contract(sym, expiry_ts, perp)
+        if df is None:
+            continue
+        d14 = df[df["days_left"] >= MIN_DAYS_LEFT]
+        if entry_after is not None:
+            d14 = d14[d14.index >= entry_after]
+        if d14.empty:
+            continue
+        ann = d14["b"] / d14["days_left"] * 365
+        for s, thetas in ((1, THETAS_POS), (-1, THETAS_NEG)):
+            for th in thetas:
+                hit = d14[s * ann >= th]
+                if hit.empty:
+                    continue
+                i0 = hit.index[0]
+                b0, P0, dl = df.loc[i0, "b"], df.loc[i0, "P"], df.loc[i0, "days_left"]
+                hold = df.loc[i0:]
+                fc = fund_contrib(s, i0, expiry_ts, P0, perp, rates)
+                risk = float((s * hold["b"]).min())
+                events.append({"sym": sym, "year": i0.year, "dir": "正" if s == 1 else "反",
+                               "theta": th, "entry": i0, "expiry": expiry_ts,
+                               "days_left": dl, "b_entry": b0,
+                               "lock_apr": s * b0 / dl * 365,
+                               "fund_apr": fc / dl * 365, "fund": fc,
+                               "risk_min": risk,
+                               "ret": s * b0 + fc - FEE})
+    return pd.DataFrame(events)
+
+
+def greedy_serial(d):
+    """贪心串行：事件按入场时间排队，与在持事件重叠的后到者跳过（资金不重叠口径）。"""
+    used, total = [], []
+    for _, r in d.sort_values("entry").iterrows():
+        if all(r["entry"] >= prev_end or r["expiry"] <= prev_start
+               for prev_start, prev_end in used):
+            used.append((r["entry"], r["expiry"]))
+            total.append(r["ret"])
+    return sum(total)
+
+
 def main():
     now = pd.Timestamp.now("UTC")
     perp, rates = load_inputs()
@@ -190,34 +236,7 @@ def main():
     # ---------- 正式扫描（TEST） ----------
     expiries_scan = [e for e in expiries
                      if T_START <= pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) < T_END]
-    events = []
-    for e in expiries_scan:
-        sym = f"{SYM}USDT_{e.strftime('%y%m%d')}"
-        expiry_ts = pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8)
-        df = build_contract(sym, expiry_ts, perp)
-        if df is None:
-            continue
-        d14 = df[df["days_left"] >= MIN_DAYS_LEFT]
-        if d14.empty:
-            continue
-        ann = d14["b"] / d14["days_left"] * 365
-        for s, thetas in ((1, THETAS_POS), (-1, THETAS_NEG)):
-            for th in thetas:
-                hit = d14[s * ann >= th]
-                if hit.empty:
-                    continue
-                i0 = hit.index[0]
-                b0, P0, dl = df.loc[i0, "b"], df.loc[i0, "P"], df.loc[i0, "days_left"]
-                hold = df.loc[i0:]
-                fc = fund_contrib(s, i0, expiry_ts, P0, perp, rates)
-                risk = float((s * hold["b"]).min())
-                events.append({"sym": sym, "year": i0.year, "dir": "正" if s == 1 else "反",
-                               "theta": th, "days_left": dl, "b_entry": b0,
-                               "lock_apr": s * b0 / dl * 365,
-                               "fund_apr": fc / dl * 365, "fund": fc,
-                               "risk_min": risk,
-                               "ret": s * b0 + fc - FEE})
-    d = pd.DataFrame(events)
+    d = scan_events(expiries_scan, perp, rates)
     print(f"\n=== H8c 正式扫描（TEST 20220101-20240828，fee {FEE*100:.2f}%）===")
     if d.empty:
         print("  无事件")
@@ -262,6 +281,24 @@ def main():
         print(f"  {sym}: b均值 {df['b'].mean()*100:+.2f}%  [{df['b'].min()*100:+.2f}%, {df['b'].max()*100:+.2f}%]  "
               f"正向最优锁定APR {pos_best*100:+.0f}%  反向最优(无贴水则为0) {neg_best*100:+.0f}%  "
               f"ann>+8% 根占比 {100*(ann>0.08).mean():.0f}%  ann<-8% 根占比 {100*(ann<-0.08).mean():.0f}%")
+
+    # ---------- 最近两年描述性模拟（θ=8% 主形态原规则回放，入场限 >= T_END；未调参） ----------
+    print(f"\n=== 最近两年描述性模拟（{T_END.date()} ~ 至今，θ=8% 原规则回放，未调参）===")
+    dd = scan_events(expiries_desc, perp, rates, entry_after=T_END)
+    sub = dd[dd["theta"] == 0.08] if len(dd) else pd.DataFrame()
+    years = (now - T_END).total_seconds() / 86400 / 365
+    if sub.empty:
+        print("  无事件")
+    else:
+        for y, g in sub.groupby(sub["expiry"].dt.year):
+            print(f"  到期 {y}: n={len(g)}  合计 {g['ret'].sum()*100:+.2f}%  "
+                  + "  ".join(f"{r['sym'][9:]}[{r['dir']}]{r['ret']*100:+.2f}%"
+                              for _, r in g.iterrows()))
+        indep = sub["ret"].sum() / years
+        serial = greedy_serial(sub) / years
+        print(f"  合计 {sub['ret'].sum()*100:+.2f}% / {years:.2f} 年 → "
+              f"事件独立年化 {indep*100:+.1f}%  贪心串行年化 {serial*100:+.1f}%  "
+              f"胜率 {100*(sub['ret']>0).mean():.0f}%  最差 {sub['ret'].min()*100:+.2f}%")
 
     # ---------- funding 年化参考 ----------
     print("\n=== ETH 永续 funding 年化参考（Σrate×365/天数，未做价格修正）===")
