@@ -97,6 +97,15 @@
 14. **策略取 funding 序列必须过滤 `open != 0`**：freqtrade 加载 1h funding feather 时
     fill_missing 会把非结算小时补成 0（不是复制前值），直接用会把"结算间隔"当成"费率为 0"；
     BNB 因费率被钳制、约半数真实结算就是 0，被过滤后由前值代替——对分位数信号影响极小但要知道。
+15. **`startup_candle_count` 是双重语义，调大前必须两头核算**（2026-08-29 FundingSqueezeV1L 踩坑）：
+    它既是**主周期暖机 K 线数**（回测里吃掉每个品种数据历史的开头一段，历史 < startup 根数 × 周期
+    的新上市品种会被"no data left after adjusting for startup candles"整对静默丢弃），又是
+    **live informative 拉取深度**（informative_pairs 声明的数据按它取历史）。FundingSqueezeV1L
+    为 live 的 90d funding 窗把 startup 提到 2160，结果回测里 KAS/ONDO/JUP 等 9 个新品种整对消失、
+    老品种 2022 年出现边界级联差异。解法：startup 用 property 按 `config['runmode']` 取值
+    （回测 600 / live 2160；判别不能用 self.dp——解析期 dp 未挂载）+ informative_pairs 按模式分流
+    （回测返回空走 feather 直读，live 才声明 informative）。诊断特征：回测交易数按"品种上市日期
+    + startup×周期"系统性截断即中招。
 
 ---
 

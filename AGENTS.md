@@ -34,9 +34,10 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/validate_strategy.py --strategy X # 一键 TEST+VAL × core+volume + 门禁 + 报告
 ./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
 
-# paper forward-test（V2，进行中）
-./user_data/scripts/paper_start.sh        # 启动（内置 SHA 校验，不匹配拒绝启动）
-.venv/bin/python user_data/scripts/paper_status.py   # 周记录
+# paper forward-test（V2 进行中 + FS 组合臂 2026-08-29 起）
+./user_data/scripts/paper_start.sh        # V2 启动（内置 SHA 校验，不匹配拒绝启动）
+./user_data/scripts/paper_start_fs.sh     # FundingSqueezeV1L 启动（独立 config/db/端口 8081，可同机并行）
+.venv/bin/python user_data/scripts/paper_status.py   # 周记录（V2 db）
 ```
 
 ## 研究纪律（2026-08-28 起新研究强制）
