@@ -26,6 +26,7 @@
       .venv/Scripts/python.exe user_data/scripts/carry_h8c_perp_delivery.py
 """
 import io
+import sys
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -35,10 +36,11 @@ from urllib.request import urlopen
 import numpy as np
 import pandas as pd
 
+SYM = sys.argv[1] if len(sys.argv) > 1 else "ETH"  # 资产前缀：ETH / BTC
 BASE = "https://data.binance.vision/data/futures"
 CACHE = Path("user_data/data/binance/quarterly")
-PERP_F = Path("user_data/data/binance/futures/ETH_USDT_USDT-4h-futures.feather")
-FUND_F = Path("user_data/data/binance/futures/ETH_USDT_USDT-1h-funding_rate.feather")
+PERP_F = Path(f"user_data/data/binance/futures/{SYM}_USDT_USDT-4h-futures.feather")
+FUND_F = Path(f"user_data/data/binance/futures/{SYM}_USDT_USDT-1h-funding_rate.feather")
 
 FEE = 0.0025
 FEE_SENSE = [0.0015, 0.0030]
@@ -177,10 +179,10 @@ def main():
 
     jobs = []
     for e in expiries:
-        if pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) < now - pd.Timedelta(days=730):
-            continue
-        jobs.append(("ETHUSDT", f"ETHUSDT_{e.strftime('%y%m%d')}", e))
-    print(f"下载/缓存 {len(jobs)} 个季度合约（4h，直连 vision + fapi 补尾）...")
+        if pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) < T_START:
+            continue  # TEST 区之前的合约不需要（ETH 2021 缓存已在库则直接命中）
+        jobs.append((f"{SYM}USDT", f"{SYM}USDT_{e.strftime('%y%m%d')}", e))
+    print(f"[{SYM}] 下载/缓存 {len(jobs)} 个季度合约（4h，直连 vision + fapi 补尾）...")
     with ThreadPoolExecutor(8) as ex:
         for line in ex.map(lambda j: download_contract(j[1], j[2]), jobs):
             print(line, flush=True)
@@ -190,7 +192,7 @@ def main():
                      if T_START <= pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) < T_END]
     events = []
     for e in expiries_scan:
-        sym = f"ETHUSDT_{e.strftime('%y%m%d')}"
+        sym = f"{SYM}USDT_{e.strftime('%y%m%d')}"
         expiry_ts = pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8)
         df = build_contract(sym, expiry_ts, perp)
         if df is None:
@@ -247,7 +249,7 @@ def main():
                      if pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) >= T_END
                      and pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8) < now]
     for e in expiries_desc:
-        sym = f"ETHUSDT_{e.strftime('%y%m%d')}"
+        sym = f"{SYM}USDT_{e.strftime('%y%m%d')}"
         expiry_ts = pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8)
         df = build_contract(sym, expiry_ts, perp)
         if df is None or len(df) < 50:
@@ -277,7 +279,7 @@ def main():
         expiry_ts = pd.Timestamp(e, tz="UTC") + pd.Timedelta(hours=8)
         if expiry_ts <= now:
             continue
-        sym = f"ETHUSDT_{e.strftime('%y%m%d')}"
+        sym = f"{SYM}USDT_{e.strftime('%y%m%d')}"
         df = build_contract(sym, expiry_ts, perp)
         if df is None or df.empty:
             print(f"  {sym}: 无数据")
