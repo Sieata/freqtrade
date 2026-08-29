@@ -43,7 +43,7 @@ PERP_F = Path(f"user_data/data/binance/futures/{SYM}_USDT_USDT-4h-futures.feathe
 FUND_F = Path(f"user_data/data/binance/futures/{SYM}_USDT_USDT-1h-funding_rate.feather")
 
 FEE = 0.0025
-FEE_SENSE = [0.0015, 0.0030]
+FEE_SENSE = [0.0015, 0.0030, 0.0050]  # 0.5% = 极端档（3腿 taker + 滑点恶化 2 倍以上）
 THETAS_POS = [0.08, 0.15, 0.25]
 THETAS_NEG = [0.08, 0.15]
 MIN_DAYS_LEFT = 14
