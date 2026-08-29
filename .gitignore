@@ -144,3 +144,4 @@ docker-compose-*.yml
 user_data/data/binance/futures_metrics/*
 !user_data/data/binance/futures_metrics/*.feather
 !user_data/data/binance/*-4h.feather
+!user_data/data/binance/quarterly/
