@@ -63,7 +63,12 @@ class OIFlushV2(IStrategy):
         import pandas as pd
 
         slug = metadata["pair"].replace("/", "_").replace(":", "_")
-        m = pd.read_feather(_metrics_dir() / f"{slug}-4h-metrics.feather")
+        path = _metrics_dir() / f"{slug}-4h-metrics.feather"
+        if not path.exists():
+            # 无 OI 数据的品种（数据可用性边界）：零信号，不参与策略
+            dataframe["flush"] = False
+            return dataframe
+        m = pd.read_feather(path)
         m["oi_chg"] = m["oi_usd"] / m["oi_usd"].shift(6) - 1
         m["oi_q"] = m["oi_chg"].rolling(self.oi_window, min_periods=self.oi_min_periods).quantile(self.oi_quantile)
         dataframe = dataframe.merge(m[["date", "oi_chg", "oi_q"]], on="date", how="left")
