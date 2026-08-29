@@ -74,6 +74,15 @@ def main():
 
     bn = bn_all()
     print(f"币安永续（USDT 本位）: {len(bn)} 个")
+    # 稳定币锚定监测（HL 用 USDC 结算、币安用 USDT——双腿分属两种美元）
+    try:
+        px = requests.get("https://api.binance.com/api/v3/ticker/price",
+                          params={"symbol": "USDCUSDT"}, timeout=15, proxies=PROXY).json()
+        dev = (float(px["price"]) - 1) * 100
+        flag = "  ⚠️ 脱锚预警" if abs(dev) > 0.5 else ""
+        print(f"USDC/USDT 当前 {px['price']}（偏离 {dev:+.3f}%）{flag}  ——历史尾部: 2023-03 SVB -8.7%/98h 恢复")
+    except Exception as e:
+        print(f"USDC/USDT 锚定查询失败: {str(e)[:60]}")
     dexes = ["main"]
     try:
         for d in requests.post(HL_URL, json={"type": "perpDexs"}, timeout=30, proxies=PROXY).json():
