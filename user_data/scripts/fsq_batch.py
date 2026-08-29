@@ -49,7 +49,7 @@ def make_variant(q, h, win=540):
 
 
 def run_one(name, text, timerange=TR_TEST):
-    TMP.mkdir(exist_ok=True)
+    TMP.mkdir(parents=True, exist_ok=True)
     f = TMP / f"{name}.py"
     f.write_text(text)
     before = set(BT_DIR.glob("backtest-result-*.zip"))
@@ -67,7 +67,7 @@ def run_one(name, text, timerange=TR_TEST):
          "--max-open-trades", str(len(PAIRS)),
          "--dry-run-wallet", str(int(STAKE * len(PAIRS) * 1.2)),
          "--stake-amount", str(STAKE)],
-        cwd=ROOT, capture_output=True, text=True, env=env,
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
     )
     if proc.returncode != 0:
         raise SystemExit(f"{name} 回测失败:\n" + "\n".join((proc.stdout + proc.stderr).splitlines()[-10:]))
@@ -111,11 +111,28 @@ def summarize(name, trades):
     return tot, pf, 100 * sum(wins.values()) / len(trades), pos_pairs, all_year_pos, ys
 
 
+def parse_only(s):
+    """--only "0.02:96,0.05:48" → [(0.02, 96), ...]（续跑：跳过其他设备已完成的组合）"""
+    out = []
+    for part in s.split(","):
+        q, h = part.strip().split(":")
+        out.append((float(q), int(h)))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="只跑 A 盲参 + 网格子集")
+    ap.add_argument("--only", type=parse_only, default=None,
+                    help="逗号分隔的 q:h 列表，只跑这些组合（跨设备续跑用）")
     args = ap.parse_args()
     grid = BLIND + GRID[2:4] if args.quick else BLIND + GRID
+    if args.only:
+        grid = [c for c in grid if c in args.only]
+        known = set(BLIND + GRID)
+        missing = [c for c in args.only if c not in known]
+        if missing:
+            raise SystemExit(f"--only 含未知组合: {missing}")
 
     print(f"{'组合':<22}{'trades':>7}{'利润$':>10}{'PF':>7}{'win%':>7}{'品种正':>7}  逐年")
     print("-" * 100)
