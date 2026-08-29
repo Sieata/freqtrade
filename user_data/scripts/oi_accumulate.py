@@ -7,7 +7,9 @@
 用法:
   .venv/Scripts/python.exe user_data/scripts/oi_accumulate.py          # 按默认池增量拉取
   .venv/Scripts/python.exe user_data/scripts/oi_accumulate.py --pairs BTC,ETH
-建议配 Windows 计划任务 / cron 每日运行（币安 API 需代理，FT_PROXY 可覆盖）。
+**在 paper 设备（24h 在线）每日 cron 运行**，本机不搞计划任务（2026-08-29 用户指令）：
+  5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
+注意：API 仅 30 天窗口，漏跑的日期无法回补——gap 会永久缺失。
 """
 import argparse
 import os

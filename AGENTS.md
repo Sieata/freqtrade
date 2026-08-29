@@ -38,6 +38,8 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 ./user_data/scripts/paper_start.sh        # V2 启动（内置 SHA 校验，不匹配拒绝启动）
 ./user_data/scripts/paper_start_fs.sh     # FundingSqueezeV1L 启动（独立 config/db/端口 8081，可同机并行）
 .venv/bin/python user_data/scripts/paper_status.py   # 周记录（V2 db）
+# OI 累积器（paper 设备每日 cron，为 OIFlush live 攒历史；漏跑无法回补）：
+# 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 ```
 
 ## 研究纪律（2026-08-28 起新研究强制）
