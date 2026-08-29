@@ -1,0 +1,16 @@
+# TOP10 实盘优先池 —— 币安 USDT-M 永续 · 市值 Top10（评估优先池，2026-08-29 起）
+# 生成: 2026-08-29 | 来源: pairs_core.txt 市值降序前 10（重生成方法：取 core 快照前 10 行）
+# 规则: 用户评估纪律（2026-08-29）——实盘优先跑市值 Top10，垃圾币是噪音；TOP10 不过，
+#       其他品种好看无意义。所有策略评估先看本池，CORE50/VOLUME 作为泛化面参考。
+# 用途: 策略评估第一口径。实盘/ paper 品种选择仍以 FREEZE 文档为准。
+#
+BTC/USDT:USDT # rank=1
+ETH/USDT:USDT # rank=2
+BNB/USDT:USDT # rank=3
+XRP/USDT:USDT # rank=4
+SOL/USDT:USDT # rank=5
+TRX/USDT:USDT # rank=6
+HYPE/USDT:USDT # rank=7 (onboard 2025-05, 仅 VAL 段有数据)
+ZEC/USDT:USDT # rank=8
+DOGE/USDT:USDT # rank=9
+XMR/USDT:USDT # rank=10

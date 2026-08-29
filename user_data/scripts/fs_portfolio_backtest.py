@@ -19,7 +19,10 @@ import pandas as pd
 BT = Path("user_data/backtest_results")
 REPORTS = Path("user_data/reports")
 SPLIT_DATE = pd.Timestamp("2024-08-28", tz="UTC")
-P11 = {"BTC", "ETH", "BNB", "XRP", "SOL", "ZEC", "DOGE", "ADA", "AVAX", "DOT", "HYPE"}
+# 评估池：TOP10 实盘优先池（2026-08-29 评估纪律）
+UNIVERSE = Path("user_data/universe/pairs_top10.txt")
+POOL = {line.split("/")[0].strip() for line in UNIVERSE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#") and "/" in line}
 
 
 def load_strategy_trades(strategy):
@@ -44,8 +47,12 @@ def load_fs_by_leg():
     r = sorted(REPORTS.glob("validate_FundingSqueezeV1L_*.md"), key=lambda p: p.stat().st_mtime)[-1]
     txt = r.read_text(encoding="utf-8")
     out = {}
-    for leg, key in [("CORE × TEST（20220101-20240828）", "TEST"), ("CORE × VAL（20240828-）", "VAL")]:
-        zname = re.search(r"结果: `(backtest-result-[0-9_-]+\.zip)`", txt.split("## " + leg)[1].split("## ")[0]).group(1)
+    for pat, key in [(r"## \w+ × TEST（20220101-20240828）", "TEST"),
+                     (r"## \w+ × VAL（20240828-）", "VAL")]:
+        m = re.search(pat, txt)
+        if not m:
+            raise SystemExit(f"{r.name}: 找不到 {pat}")
+        zname = re.search(r"结果: `(backtest-result-[0-9_-]+\.zip)`", txt[m.end():].split("## ")[0]).group(1)
         with zipfile.ZipFile(BT / zname) as z:
             for n in z.namelist():
                 if n.endswith(".json"):
@@ -55,7 +62,7 @@ def load_fs_by_leg():
     for k in out:
         out[k]["open_dt"] = pd.to_datetime(out[k]["open_date"], utc=True)
         out[k]["close_dt"] = pd.to_datetime(out[k]["close_date"], utc=True)
-        out[k] = out[k][out[k]["pair"].str.split("/").str[0].isin(P11)].reset_index(drop=True)
+        out[k] = out[k][out[k]["pair"].str.split("/").str[0].isin(POOL)].reset_index(drop=True)
     return out
 
 
@@ -118,10 +125,11 @@ def report_period(v2, fs, name):
 def main():
     v2_all = load_strategy_trades("WeekendReverseV2")
     fs_legs = load_fs_by_leg()
+    v2_all = v2_all[v2_all["pair"].str.split("/").str[0].isin(POOL)]
     v2_test = v2_all[v2_all["close_dt"] < SPLIT_DATE]
     v2_val = v2_all[v2_all["close_dt"] >= SPLIT_DATE]
-    report_period(v2_test, fs_legs["TEST"], "TEST 20220101-20240828（core 11 品种）")
-    report_period(v2_val, fs_legs["VAL"], "VAL 20240828-（core 11 品种）")
+    report_period(v2_test, fs_legs["TEST"], "TEST 20220101-20240828（TOP10 池）")
+    report_period(v2_val, fs_legs["VAL"], "VAL 20240828-（TOP10 池）")
 
 
 if __name__ == "__main__":

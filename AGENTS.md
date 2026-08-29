@@ -46,6 +46,9 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   VAL `20240828-` 定版候选只跑一次，跑过又改参 = 作废重来；2021 数据只作暖机；重切要改文件+RESEARCH.md 记录。
 - **币池分层**（`user_data/universe/pairs_*.txt`）：实盘/paper 只允许 CORE（市值 Top50）；
   VOLUME（24h 量 Top30）只做泛化测试、禁实盘；双池同参都过才算普适。池文件是生成日快照。
+- **TOP10 市值池优先（2026-08-29 用户纪律）**：策略评估第一口径用 `--pool top10`
+  （`user_data/universe/pairs_top10.txt`）——实盘优先跑市值 Top10，垃圾币是噪音，
+  TOP10 不过则其他品种好看无意义。CORE50/VOLUME 只作泛化面参考；年化等汇总数字先看 TOP10。
 - 泛化验证一律独立口径（固定 $1,000/笔，validate_strategy.py 内置）；复利口径只用于定版后单池回测。
 - VAL 报告必看单年集中度，防新币单年 pump 假 edge（ZEC/BANK 教训）。
 - **展示规范（2026-08-29）**：凡展示 PnL 必带年化才直观——钱包口径（预留资金 = 池规模×1.2×$1,000）

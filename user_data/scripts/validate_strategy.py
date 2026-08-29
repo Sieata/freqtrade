@@ -252,7 +252,7 @@ def fmt_table(pairs, years, cell, cnt, wins):
 def main():
     ap = argparse.ArgumentParser(description="规范化策略验证（TEST/VAL × core/volume）")
     ap.add_argument("--strategy", required=True)
-    ap.add_argument("--pool", choices=["core", "volume", "both"], default="both")
+    ap.add_argument("--pool", choices=["top10", "core", "volume", "both"], default="both")
     ap.add_argument("--config", default=str(ROOT / "user_data" / "config_perpetual.json"))
     ap.add_argument("--fee", type=float, default=None)
     ap.add_argument("--skip-test", action="store_true", help="只跑 VAL")
