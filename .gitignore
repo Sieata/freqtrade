@@ -146,3 +146,4 @@ user_data/data/binance/futures_metrics/*
 !user_data/data/binance/futures_metrics/*.feather
 !user_data/data/binance/*-4h.feather
 !user_data/data/binance/quarterly/
+!user_data/data/binance/h8c_paper/

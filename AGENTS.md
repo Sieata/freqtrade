@@ -42,6 +42,9 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 # BigMove paper（Tier B 组合臂，2026-08-29 起判据见 paper/FREEZE_BIGMOVE.md）：
 ./user_data/scripts/paper_start_bigmove.sh   # 第三实例（端口 8082，db 独立）
+# H8c 双腿基差套利 paper 模拟器（2026-08-29 起判据见 paper/FREEZE_H8C.md；模拟交易非 freqtrade 策略）：
+./user_data/scripts/h8c_paper_start.sh   # SHA 校验 + 跑一轮；常驻监控（paper 设备 cron）：
+# 17 * * * * cd <repo> && .venv/bin/python user_data/scripts/h8c_paper.py >> user_data/logs/h8c_paper.log 2>&1
 ```
 
 ## 研究纪律（2026-08-28 起新研究强制）
