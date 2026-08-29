@@ -16,6 +16,12 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+# 计划任务环境无 shell 代理变量，脚本自带代理（FT_PROXY 可覆盖，none 直连）
+_proxy = os.environ.get("FT_PROXY", "http://127.0.0.1:7897")
+if _proxy != "none":
+    os.environ.setdefault("https_proxy", _proxy)
+    os.environ.setdefault("http_proxy", _proxy)
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUT = ROOT / "user_data" / "data" / "binance" / "futures_metrics"
 DEFAULT_PAIRS = ["BTC", "ETH", "BNB", "XRP", "SOL", "ZEC", "DOGE", "ADA", "AVAX", "DOT",
