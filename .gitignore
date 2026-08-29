@@ -139,3 +139,6 @@ target/
 !config_examples/config_freqai.example.json
 
 docker-compose-*.yml
+!user_data/data/binance/futures_metrics/
+user_data/data/binance/futures_metrics/*
+!user_data/data/binance/futures_metrics/*.feather

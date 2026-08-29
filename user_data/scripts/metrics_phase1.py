@@ -13,7 +13,7 @@ H6 taker 卖压衰竭做多: taker_ls 24h 均值 ≤ 自身 180d p2
 import numpy as np
 import pandas as pd
 
-DATA = "user_data/data/binance/futures"
+DATA = "user_data/data/binance/futures_metrics"
 PAIRS = ["BTC", "ETH", "BNB", "XRP", "SOL", "ZEC", "DOGE", "ADA", "AVAX", "DOT"]
 FEE_RT = 0.001
 T_START, T_END = "2022-01-01", "2024-08-28"

@@ -20,7 +20,7 @@ from urllib.request import urlopen
 import pandas as pd
 
 BASE = "https://data.binance.vision/data/futures/um/daily/metrics"
-FUT_DIR = Path(__file__).resolve().parent.parent / "data" / "binance" / "futures"
+FUT_DIR = Path(__file__).resolve().parent.parent / "data" / "binance" / "futures_metrics"
 PHASE1_PAIRS = ["BTC", "ETH", "BNB", "XRP", "SOL", "ZEC", "DOGE", "ADA", "AVAX", "DOT"]
 START = date(2021, 6, 1)
 COLS = {
