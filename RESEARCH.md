@@ -535,6 +535,10 @@ HYPE 仅 VAL 段有数据），`validate_strategy.py --pool top10` 已支持。*
   ——FS 仍贡献约 +9pp 年化，但质量标注：VAL 段靠 ZEC，需 paper 期观察其蓝筹贡献是否持续为负。
 - FS paper（CORE 50）决策不变，但 FREEZE_FS 增补 TOP10 附注：6 个月评审时必须按 TOP10 切片
   单独核算 FS 贡献，蓝筹贡献持续为负则降级/退出。
+- **利润表达口径 standardized（用户指令 2026-08-29）**：逐年度利润按"每年重置 $1,000 本金"
+  表达为百分比（跨年不复利不共用额度），年化给钱包/占仓双口径。权威定义写入
+  STRATEGY_WORKFLOW 第〇节 0.4；validate_strategy / pool_review / 组合回测脚本已内置，
+  FREEZE_FS / FREEZE_V2 评审口径同步。示例（FS TOP10 VAL）：2024 -5.8% / 2025 +175.8% / 2026 +60.0%。
 
 ---
 

@@ -88,7 +88,8 @@ def same_pair_overlap(v2, fs):
     return n
 
 
-def stats(df, label):
+def stats(df, label, yearly_base=1000):
+    # yearly_base: 每年重置本金（单臂 $1,000；双臂合并 $2,000），逐年收益率 = 当年利润/base
     df = df.copy()
     df["profit$"] = df["profit_ratio"] * 1000
     df["month"] = df["close_dt"].dt.strftime("%Y-%m")
@@ -96,7 +97,7 @@ def stats(df, label):
     eq = m.cumsum()
     mdd = (eq - eq.cummax()).min()
     yr = df.groupby(df["close_dt"].dt.year)["profit$"].sum()
-    ys = ", ".join(f"{y}:{v:+,.0f}" for y, v in yr.items())
+    ys = ", ".join(f"{y}:{v:+,.0f}$({v / yearly_base * 100:+.0f}%)" for y, v in yr.items())
     return {
         "label": label, "n": len(df), "total": df["profit$"].sum(),
         "m_mean": m.mean(), "m_min": m.min(), "neg%": (m < 0).mean() * 100,
@@ -108,7 +109,7 @@ def report_period(v2, fs, name):
     print(f"\n{'=' * 92}\n【{name}】 V2={len(v2)}笔  FS={len(fs)}笔  合并={len(v2) + len(fs)}笔\n{'=' * 92}")
     s_v2 = stats(v2, "V2")
     s_fs = stats(fs, "FS")
-    s_all = stats(pd.concat([v2, fs]), "合并")
+    s_all = stats(pd.concat([v2, fs]), "合并", yearly_base=2000)
     print(f"{'':<6}{'trades':>7}{'利润$':>10}{'月均$':>8}{'最差月$':>9}{'负月%':>7}{'月度回撤$':>10}")
     for s in (s_v2, s_fs, s_all):
         print(f"{s['label']:<6}{s['n']:>7}{s['total']:>+10,.0f}{s['m_mean']:>+8,.0f}"

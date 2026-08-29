@@ -76,6 +76,9 @@ def main():
     print("-" * len(hdr))
     print(f"{'TOTAL':<8}" + "".join(f"{row_total[y]:>12,.0f}" for y in years)
           + f"{sum(row_total.values()):>12,.0f}{len(trades):>6}{100*sum(1 for t in trades if t['profit_ratio']>0)/len(trades):>8.1f}")
+    # 逐年收益率（2026-08-29 口径：每年重置 $1,000 本金，当年利润 ÷ STAKE = 当年收益率%）
+    print(f"{'TOTAL%':<8}" + "".join(f"{row_total[y] / STAKE * 100:>11.1f}%" for y in years)
+          + f"{sum(row_total.values()) / STAKE * 100:>11.1f}%")
 
     # 集中度提示
     pair_tot = {p: sum(cell.get((p, y), 0.0) for y in years) for p in pairs}
