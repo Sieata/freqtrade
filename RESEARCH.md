@@ -750,3 +750,48 @@ q=0.05/h=48（网格中 q=0.08/h=48 更优 +$3,097，仅记录不事后切换）
   （Tier A 引擎现行门禁不变 / Tier B 事件臂按组合增量评估，宽度替代为 7 条硬性+增量门禁），
   含 FS 实测样例与待批阈值。**未生效，待用户批准**。
 - OI 累积器改由 **paper 设备每日 cron** 运行（2026-08-29 用户指令：本机不搞计划任务；本机注册已撤销）。注意 API 仅 30 天窗口，漏跑日期无法回补——累积器在 git 里，已有 31 天存量，paper 设备接手后按日续传。
+
+---
+
+## 十四、自研策略代码审计（2026-08-29，用户指令：排查代码 bug 导致的异常盈亏）
+
+**范围**：V2 / V1 / BigMoveV1 / CrashBuyV1 / FS-V1L / OIFlushV2（OIFlushV1 已归档仅备注）。
+**方法**：人工逐行读码查已知 bug 模式 + freqtrade 工具级检测（lookahead-analysis /
+recursive-analysis，TOP10 池，各 20 信号）。
+
+### 14.1 工具级检测结果（全过）
+
+| 检测 | V2 | V1 | BigMove | CrashBuy | FS-V1L | OIFlushV2 |
+|---|---|---|---|---|---|---|
+| lookahead-analysis（前视偏差） | No | No | No | No | No | No |
+| recursive-analysis（暖机漂移） | 无 | 无 | 无 | 无 | 无 | 无 |
+| 指标前视 | 无 | 无 | 无 | 无 | 无 | 无 |
+
+审计配置：`config_lookahead_audit.json`（市价单+price_side=other，工具要求）；日志
+`user_data/reports/logs/lookahead_audit_20260829.log`、`recursive_audit_20260829.log`。
+顺带确认：全部回测费率 = 0.05%/边（交易所最低档 taker worst-case）。
+
+### 14.2 人工审查结论（逐策略）
+
+- **V2**：周末窗口时区正确（UTC+8 北京时间，btc 蜡烛 UTC）；入场条件全部 shift(1) 无前视；
+  89~91% 胜率源于尾随机制（+1.5% 激活/0.2% 步长 → 机械性小赢），**非代码异常**。
+  已知近似：尾随止损回测为 K 线内路径近似（freqtrade 标准限制），live 轮询粒度更细。
+- **V1**：同族逻辑，同结论。
+- **BigMoveV1**：BTC 市场过滤走标准 informative 模式，无前视；"ma200"实为 SMA(200×4h)≈33 日线
+  （命名歧义非 bug，历次回测口径一致）。
+- **CrashBuyV1**：入场 shift(1) 正确；**潜在怪癖**：EMA20 上穿离场信号列仍会阻挡同根 K 线入场
+  （V1 教训的模式在本策略保留）——但"崩盘入场 K"与"EMA20 上穿 K"事件互斥，实际影响 ≈0，记录备查。
+- **FS-V1L**：funding ffill 对齐无前视（结算时刻即可知）；rolling 540 ≤ startup 600 窗口完整；
+  BNB 零费率过滤口径已核实（13.2/文档）。
+- **OIFlushV2**：oi_q 在全史 feather 上预计算后 merge，**天然免疫 startup 裁剪**（与 V1L 的
+  informative 裁剪坑不同源）；无 metrics 品种零信号守卫已加（TOP10 数字修复前后逐位一致）。
+- **OIFlushV1（归档）**：缺无 metrics 品种守卫——勿在 CORE 全池直接跑，归档件不修。
+
+### 14.3 审计结论
+
+**未发现导致异常盈亏的代码 bug。** 此前疑似"异常"的数字全部有非代码解释：
+- V2 高胜率/高绝对收益 = 尾随机制 + 周末效应（真实 edge，TOP10 四门禁过）；
+- FS/OIFlush/BigMove 的单年尖峰 = ZEC 2025、2024 春季基差等市场事件（数据，非代码）；
+- V1L 曾存在的 informative 裁剪丢对 = 已发现已修复的基础设施缺陷（11.8）。
+残留风险两项（记录不阻塞）：尾随止损回测近似（V2/V1/CrashBuy 共有，live 粒度更细）、
+CrashBuy 的离场信号阻挡怪癖（影响≈0）。
