@@ -1,11 +1,19 @@
-"""WeekendReverseV1 forward-test evaluator
+"""Forward-test evaluator（V2/V1/FS/BigMove）
 Reads the dry-run SQLite DB and prints a forward-test report vs. backtest baseline.
-Usage: .venv/Scripts/python.exe user_data/scripts/paper_status.py
+Usage:
+  .venv/bin/python user_data/scripts/paper_status.py                     # V2（默认 db）
+  .venv/bin/python user_data/scripts/paper_status.py --strategy FundingSqueezeV1L
+  .venv/bin/python user_data/scripts/paper_status.py --strategy BigMoveV1
+db 路径按策略自动解析（也可 --db 覆盖）。
 """
 import os, sqlite3, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB = os.path.join(ROOT, "user_data", "tradesv3.dryrun.sqlite")
+DB_DEFAULT = os.path.join(ROOT, "user_data", "tradesv3.dryrun.sqlite")
+DB_BY_STRATEGY = {
+    "FundingSqueezeV1L": os.path.join(ROOT, "user_data", "tradesv3.dryrun.fs.sqlite"),
+    "BigMoveV1": os.path.join(ROOT, "user_data", "tradesv3.dryrun.bigmove.sqlite"),
+}
 
 # Backtest baselines (frozen in paper/FREEZE.md & FREEZE_V2.md; invalid if strategy changes).
 # V2 uses the warmup-complete local rerun figure (FREEZE_V2.md §8: 537 trades / +$375,330).
@@ -24,19 +32,40 @@ BASELINES = {
         "trades": 537,
         "start_wallet": 1000,
     },
+    # Tier B 事件臂（基线 = 各自 FREEZE 文档的 TOP10 验证口径；独立 $1,000/笔）
+    "FundingSqueezeV1L": {
+        "profit_abs": 2291,     # TOP10 VAL 合计（每年重置 $1,000 口径）
+        "winrate": 50.9,
+        "dd": 5.8,
+        "trades": 275,
+        "start_wallet": 10000,  # config_paper_fs: 8 并发 × $1,000
+    },
+    "BigMoveV1": {
+        "profit_abs": 3739,     # TOP10 VAL 合计
+        "winrate": 50.0,
+        "dd": 2.2,
+        "trades": 38,
+        "start_wallet": 5000,   # config_paper_bigmove: 3 并发 × $1,000
+    },
 }
 
-# Pre-defined forward-test criteria (green/red lights)
+# Pre-defined forward-test criteria（默认 V1/V2；Tier B 臂各自 FREEZE 判据覆盖）
 CRITERIA = {
     "min_trades": 20,      # below this, no statistical meaning
     "min_winrate": 70.0,   # historical 91.4%, wide margin for small sample
     "max_dd": 30.0,        # 1.5x historical 20.5%
 }
+CRITERIA_BY_STRATEGY = {
+    # FREEZE_FS 第四节: 6 个月 ≥50 笔 / PF≥1.2(此处以胜率近似 45%) / dd≤15%
+    "FundingSqueezeV1L": {"min_trades": 50, "min_winrate": 45.0, "max_dd": 15.0},
+    # FREEZE_BIGMOVE 第四节: 低频 ≥6 笔 / PF≥1.2(胜率近似 40%) / dd≤5%
+    "BigMoveV1": {"min_trades": 6, "min_winrate": 40.0, "max_dd": 5.0},
+}
 
-def load_closed():
-    if not os.path.exists(DB):
+def load_closed(db):
+    if not os.path.exists(db):
         return None, None
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(db)
     cur = con.cursor()
     cols = [r[1] for r in cur.execute("PRAGMA table_info(trades)").fetchall()]
     prof = "profit_abs" if "profit_abs" in cols else "close_profit_abs"
@@ -59,10 +88,14 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--strategy", default="WeekendReverseV2", choices=sorted(BASELINES))
+    ap.add_argument("--db", default=None, help="覆盖 db 路径（默认按策略解析）")
     args = ap.parse_args()
     BASELINE = BASELINES[args.strategy]
+    CRITERIA.update(CRITERIA_BY_STRATEGY.get(args.strategy, {}))
+    global DB
+    DB = args.db or DB_BY_STRATEGY.get(args.strategy, DB_DEFAULT)
 
-    rows, _ = load_closed()
+    rows, _ = load_closed(DB)
     if rows is None:
         print("X no dry-run DB found (forward-test not started, or nothing closed yet)")
         print(f"  expected path: {DB}")
