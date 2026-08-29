@@ -31,6 +31,8 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 UNIVERSE = ROOT / "user_data" / "universe"
 STRATEGIES = ROOT / "user_data" / "strategies"
@@ -136,7 +138,7 @@ def parse_result(zip_path):
     raise SystemExit(f"{zip_path}: 无策略结果")
 
 
-def analyze(stats, trades):
+def analyze(stats, trades, max_open_trades=1):
     """独立口径分析：每笔固定 $1,000。返回 (portfolio dict, 按品种表, 集中度 dict)。"""
     cell = defaultdict(float)
     cnt = defaultdict(int)
@@ -179,6 +181,24 @@ def analyze(stats, trades):
         "pairs_profitable": len(prof_pairs),
         "pairs_total": len(pairs),
     }
+
+    # 年化（2026-08-29 展示约定）：固定 $1,000/笔不复利；钱包 = max_open_trades×1.2×$1,000
+    if trades:
+        o = pd.Timestamp(min(t["open_date"] for t in trades))
+        c = pd.Timestamp(max(t["close_date"] for t in trades))
+        span_years = max((c - o).total_seconds() / 86400 / 365.25, 1e-9)
+        wallet = max_open_trades * 1.2 * STAKE
+        holds = sum(
+            (pd.Timestamp(t["close_date"]) - pd.Timestamp(t["open_date"])).total_seconds()
+            for t in trades
+        )
+        avg_conc = holds / (span_years * 365.25 * 86400)
+        portfolio.update({
+            "years": span_years,
+            "avg_conc": avg_conc,
+            "ann_wallet": (portfolio["profit_abs"] / span_years) / wallet,
+            "ann_deployed": (portfolio["profit_abs"] / span_years) / max(avg_conc * STAKE, 1e-9),
+        })
     return portfolio, (pairs, years, cell, cnt, wins), conc
 
 
@@ -279,14 +299,19 @@ def main():
     ]
     for pool, split_name, tr, have, skipped, zp in runs:
         stats, trades = parse_result(zp)
-        portfolio, table, conc = analyze(stats, trades)
+        portfolio, table, conc = analyze(stats, trades, len(have))
         gates = gate_check(split_name, portfolio, conc)
         if any(r[1] == "FAIL" for r in gates):
             all_pass = False
+        ann = (f"年化: 钱包口径 {portfolio['ann_wallet'] * 100:+.1f}%/年 · "
+               f"占仓口径 {portfolio['ann_deployed'] * 100:+.1f}%/年"
+               f"（平均并发 {portfolio['avg_conc']:.1f} 仓，{portfolio['years']:.2f} 年）"
+               if "ann_wallet" in portfolio else "年化: 无交易")
         print(f"\n=== {pool.upper()} × {split_name} ({tr}) ===")
         print(f"trades={portfolio['trades']}  profit=${portfolio['profit_abs']:,.0f}  "
               f"win%={portfolio['win_rate'] * 100:.1f}  PF={portfolio['pf']:.2f}  "
               f"dd={portfolio['dd'] * 100:.1f}%  盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}")
+        print(ann)
         print(f"独立口径品种×年度（$1,000/笔）:")
         print(fmt_table(*table))
         for name, verdict, detail in gates:
@@ -302,6 +327,7 @@ def main():
                    f"trades={portfolio['trades']} profit=${portfolio['profit_abs']:,.0f} "
                    f"win%={portfolio['win_rate'] * 100:.1f} PF={portfolio['pf']:.2f} "
                    f"dd={portfolio['dd'] * 100:.1f}% 盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}",
+                   f"**{ann}**",
                    "",
                    "```", fmt_table(*table), "```", "", "| 门禁 | 结果 | 说明 |", "|---|---|---|"]
         report += [f"| {name} | {verdict} | {detail} |" for name, verdict, detail in gates]

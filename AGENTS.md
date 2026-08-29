@@ -48,6 +48,8 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   VOLUME（24h 量 Top30）只做泛化测试、禁实盘；双池同参都过才算普适。池文件是生成日快照。
 - 泛化验证一律独立口径（固定 $1,000/笔，validate_strategy.py 内置）；复利口径只用于定版后单池回测。
 - VAL 报告必看单年集中度，防新币单年 pump 假 edge（ZEC/BANK 教训）。
+- **展示规范（2026-08-29）**：凡展示 PnL 必带年化才直观——钱包口径（预留资金 = 池规模×1.2×$1,000）
+  与占仓口径（实际占用 = 平均并发仓×$1,000）都给；validate_strategy.py 已自动输出，手写报告照此格式。
 
 ## 禁改 / 高危
 
