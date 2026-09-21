@@ -52,6 +52,7 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/funding_spread_scan.py --deep 56  # 跨所费差扫描（币安×Hyperliquid + 14天持续性深查）
 .venv/bin/python user_data/scripts/cross_arb_research.py --mode both --pool top10   # 跨品种套利（费率分散 + 协整价差）
 .venv/bin/python user_data/scripts/basis_arb_research.py --mode spotperp --rule funding_pos --enter-bp 5 --exit-bp -2
+.venv/bin/python user_data/scripts/cm_perp_delivery_research.py    # 币本位永续×交割（cm 桶 + dapi 全历史 funding，含覆盖率体检）
 #   ↑ 单所跨工具套利：spotperp=多现货+空永续；calendar=多现货+空季度（--thresh/--horizon）
 ./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
 .venv/bin/python user_data/scripts/data_check.py --pools top10,core,volume   # 数据接缝校验（最新时间戳/缺口/重复；退出码可作 cron 告警）

@@ -38,6 +38,9 @@ user_data/data/*
 !user_data/data/binance/
 user_data/data/binance/*
 !user_data/data/binance/futures/
+# 交割合约与币本位（COIN-M）数据同样随仓库分发（研究可复现，免依赖代理下载）
+!user_data/data/binance/quarterly/
+!user_data/data/binance/cm/
 freqtrade-plot.html
 freqtrade-profit-plot.html
 freqtrade/rpc/api_server/ui/*
