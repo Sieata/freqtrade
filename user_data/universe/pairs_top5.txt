@@ -1,0 +1,12 @@
+# TOP5 蓝筹池 —— 币安 USDT-M 永续 · 市值 Top5（2026-09-21 新增，评估口径）
+# 生成: 2026-09-21 | 来源: pairs_top10.txt 市值降序前 5（同一 2026-08-29 快照，无新数据抓取）
+# 规则: TOP10 的极简子集——只用真蓝筹（BTC/ETH/BNB/XRP/SOL）。用途是回答"策略在蓝筹上
+#       是否还成立"：TOP10 里 ZEC/DOGE/XMR 这类中盘贡献了相当比例利润，需单独剥离检验。
+# 用途: 评估参考池（不是实盘池；实盘品种仍以各策略 FREEZE 文档为准）。
+# 注意: 池小 → 笔数少 → 置信区间宽；≥80% 品种盈利门禁在 5 品种下等价于 ≥4/5 盈利。
+#
+BTC/USDT:USDT # rank=1 mcap=$1.57T
+ETH/USDT:USDT # rank=2 mcap=$296.58B
+BNB/USDT:USDT # rank=3 mcap=$92.62B
+XRP/USDT:USDT # rank=4 mcap=$88.24B
+SOL/USDT:USDT # rank=5 mcap=$61.41B

@@ -19,14 +19,21 @@ import pandas as pd
 
 BT = Path("user_data/backtest_results")
 REPORTS = Path("user_data/reports")
-UNIVERSE = Path("user_data/universe/pairs_top10.txt")
 SPLIT = pd.Timestamp("2024-08-28", tz="UTC")
-WALLET = 12000  # TOP10 × 1.2 × $1,000
 STAKE = 1000
-
-POOL = {line.split("/")[0].strip() for line in UNIVERSE.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#") and "/" in line}
 ARMS = ["FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
+
+# 币池与钱包口径由 --pool 决定（main 里赋值）：钱包 = 池内品种数 × 1.2 × $1,000
+POOL = set()
+WALLET = 12000  # TOP10 默认
+
+
+def load_pool(pool):
+    """读 user_data/universe/pairs_<pool>.txt → (品种基名集合, 对应钱包口径)。"""
+    path = Path("user_data/universe") / f"pairs_{pool}.txt"
+    pairs = {line.split("/")[0].strip() for line in path.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.startswith("#") and "/" in line}
+    return pairs, int(len(pairs) * 1.2 * STAKE)
 
 
 def load_leg_zips(strategy):
@@ -101,8 +108,13 @@ def eval_arm(arm, v2_test, v2_val):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", default=None)
+    ap.add_argument("--arms", default="", help="逗号分隔覆盖臂列表，如 CrashBuyV2,OIFlushV2")
+    ap.add_argument("--pool", default="top10", help="币池名（user_data/universe/pairs_<pool>.txt）")
     args = ap.parse_args()
-    arms = [args.arm] if args.arm else ARMS
+    global POOL, WALLET
+    POOL, WALLET = load_pool(args.pool)
+    arms = [args.arm] if args.arm else ([a for a in args.arms.split(",") if a] or ARMS)
+    print(f"币池={args.pool}（{len(POOL)} 品种）  钱包=${WALLET:,}  臂={arms}")
     v2_all, v2_report = load_arm("WeekendReverseV2")
     v2_test = v2_all[v2_all["close_dt"] < SPLIT]
     v2_val = v2_all[v2_all["close_dt"] >= SPLIT]

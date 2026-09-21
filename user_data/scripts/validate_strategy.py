@@ -3,7 +3,9 @@
 流程标准（详见 STRATEGY_WORKFLOW.md，切分与币池的唯一权威来源在 user_data/universe/）：
   时间:   TEST 20220101-20240828（调参只准用这段，2021 仅暖机）
           VAL  20240828-          （定版候选只跑一次；跑过又改参 = 作废重来）
-  币池:   CORE   pairs_core.txt    实盘允许池（市值 Top50）
+  币池:   TOP5   pairs_top5.txt    蓝筹子集（市值 Top5，剥离中盘贡献用）
+          TOP10  pairs_top10.txt   评估第一口径（市值 Top10）
+          CORE   pairs_core.txt    实盘允许池（市值 Top50）
           VOLUME pairs_volume.txt  泛化测试池（24h 成交量 Top30，禁实盘）
   口径:   泛化验证用独立口径 —— --stake-amount 1000 --max-open-trades <池内品种数>，
           每笔固定 $1,000，与 pool_review.py 的独立口径一致；复利口径留给定版后的
@@ -255,7 +257,7 @@ def fmt_table(pairs, years, cell, cnt, wins):
 def main():
     ap = argparse.ArgumentParser(description="规范化策略验证（TEST/VAL × core/volume）")
     ap.add_argument("--strategy", required=True)
-    ap.add_argument("--pool", choices=["top10", "core", "volume", "both"], default="both")
+    ap.add_argument("--pool", choices=["top5", "top10", "core", "volume", "both"], default="both")
     ap.add_argument("--config", default=str(ROOT / "user_data" / "config_perpetual.json"))
     ap.add_argument("--fee", type=float, default=None)
     ap.add_argument("--skip-test", action="store_true", help="只跑 VAL")

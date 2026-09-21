@@ -37,6 +37,9 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/time_splits.py                    # 打印冻结的 TEST/VAL timerange
 .venv/bin/python user_data/scripts/make_universe.py                  # 重生成币池快照 core50/volume30（需代理）
 .venv/bin/python user_data/scripts/validate_strategy.py --strategy X # 一键 TEST+VAL × core+volume + 门禁 + 报告
+#   --pool top5 / top10 / core / volume / both（top5=纯蓝筹 BTC/ETH/BNB/XRP/SOL，剥离中盘贡献用）
+.venv/bin/python user_data/scripts/arm_stats.py --pool top5          # 单臂统计质量表（逐笔 t 检验+自举 CI+集中度）
+.venv/bin/python user_data/scripts/tier_b_eval.py --pool top5        # Tier B 增量门禁（--arms 可加 CrashBuyV2 等）
 ./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
 
 # paper forward-test（V2 进行中 + FS 组合臂 2026-08-29 起）
@@ -61,6 +64,9 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - **TOP10 市值池优先（2026-08-29 用户纪律）**：策略评估第一口径用 `--pool top10`
   （`user_data/universe/pairs_top10.txt`）——实盘优先跑市值 Top10，垃圾币是噪音，
   TOP10 不过则其他品种好看无意义。CORE50/VOLUME 只作泛化面参考；年化等汇总数字先看 TOP10。
+- **TOP5 蓝筹参照池（2026-09-21）**：`--pool top5`（BTC/ETH/BNB/XRP/SOL）= TOP10 的纯蓝筹子集，
+  用于剥离中盘贡献（TOP10 的利润有相当比例来自 ZEC/DOGE/XMR/TRX）。只作**描述性复核**：
+  5 品种下"≥80% 品种盈利"= 最多 1 个品种能亏，容错极窄，结论别当独立验证用。
 - 泛化验证一律独立口径（固定 $1,000/笔，validate_strategy.py 内置）；复利口径只用于定版后单池回测。
 - VAL 报告必看单年集中度，防新币单年 pump 假 edge（ZEC/BANK 教训）。
 - **展示规范（2026-08-29，权威定义：STRATEGY_WORKFLOW 第〇节 0.4）**：凡展示 PnL——
