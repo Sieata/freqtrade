@@ -27,6 +27,13 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 # 结果速览 / 币池独立口径复核
 .venv/bin/python user_data/scripts/bt_summary.py <result.zip>
 .venv/bin/python user_data/scripts/pool_review.py <result.zip> --worst 10
+
+# 单年/单区间切片（独立 $1,000/笔，口径同 validate；--monthly 加月度与品种分布）
+.venv/bin/python user_data/scripts/year_slice.py --year 2026 --pools top10,top5,top2 --monthly
+.venv/bin/python user_data/scripts/year_slice.py --year 2026 --pools top10 --fee 0.001   # 摩擦压力
+
+# 单臂统计质量（逐笔 t 检验 + 自举 CI + 去最赚 1 笔 + 集中度）
+.venv/bin/python user_data/scripts/arm_stats.py --pool top5 --arms WeekendReverseV2,CrashBuyV2
 .venv/bin/python user_data/scripts/exit_anatomy.py <result.zip>   # 出场结构/浮亏深度/止损反事实/保本胜率
 
 # 仓位轴扫描（比例仓位只能靠临时 config，CLI 无 --tradable-balance-ratio）
