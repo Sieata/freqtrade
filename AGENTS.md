@@ -108,6 +108,14 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - 文档"钱包口径回撤" = `max_relative_drawdown`。
 - dry-run DB 路径要显式配置（`db_url`），默认落在 CWD。
 - 回测不含滑点；摩擦测试用 `--fee` 覆盖。
+- **`ensure-data.sh` 在受限 shell 里跑不了**：它开头用 `dirname`、解析币池用 `sed/tr`，而某些会话
+  （如 WorkBuddy 内置 bash）PATH 里没有这些命令，直接调用会 `command not found`。变通：用
+  `.venv/Scripts/python.exe` 写 `subprocess` 调 `freqtrade download-data`，代理用 `os.environ`
+  注入 `https_proxy/http_proxy=http://127.0.0.1:7897`（download-data 路径实测认这两个变量）。
+  同理 `git push | tail` 这类管道会因缺 `tail` 报 exit 127，改用 python 过滤输出。
+- 口径速查：`bt_summary.py` 输出 `ddW`（钱包口径 `max_relative_drawdown`，文档引用这个）与
+  `ddA`（账户口径 `max_drawdown_account`，数值明显偏小）。二者在满仓复利下可差 12pp
+  （同一次回测 32.1% vs 20.2%），**勿混用、勿只看 ddA**。
 - 回测启动也要访问 binance（reload_markets）：aiohttp 不认 shell 代理变量，回测 config 必须
   `ccxt_config.aiohttp_trust_env: true`（config_perpetual/bigmove 已加），且 shell 带 https_proxy。
 - 固定每笔本金的池测试要 `--stake-amount` + `--dry-run-wallet`（≥ 本金×并发仓×1.2），否则
