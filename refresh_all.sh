@@ -5,7 +5,10 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+# 纯 bash 定位脚本目录（不依赖 dirname，受限 shell 也可运行；2026-09-21 加固）
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in */*) ;; *) SELF="./$SELF" ;; esac
+ROOT="$(cd "${SELF%/*}" && pwd)"
 # Windows(Git Bash) 的 venv 布局是 Scripts/python.exe，Unix 是 bin/python
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
@@ -28,7 +31,8 @@ echo "── [2/3] OI 累积器（OIFlush live 前置）──"
 
 echo
 echo "── [3/3] metrics 月度增量（TOP10 品种）──"
-"$PY" user_data/scripts/import_metrics_vision.py BTC ETH BNB XRP SOL TRX HYPE ZEC DOGE XMR | tail -10
+"$PY" user_data/scripts/import_metrics_vision.py BTC ETH BNB XRP SOL TRX HYPE ZEC DOGE XMR \
+    | "$PY" -c "import sys; ls = sys.stdin.readlines(); print(''.join(ls[-10:]), end='')"
 
 echo
 echo "保鲜完成。提示：git 里已有全部历史，多设备各自运行互不冲突（feather 随 git 分发）。"

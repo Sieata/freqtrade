@@ -14,7 +14,8 @@
 - binance API 需代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`（shell 环境变量默认没有）。
 - WAF 403 主要拦 funding 的老 startTime 查询：历史从 data.binance.vision 补（`user_data/scripts/import_funding_vision.py`，直连无需代理），近期增量走 API。批量拉取时 funding 端点会被整体临时封锁几分钟（连近期增量也 403），等几分钟小批量重试即可；vision 无 funding 每日包，个别月份 zip 缺件会留空洞（BNB 2025-11 先例），完整性检查看相邻间隔 >3 天。
 - GitHub SSH 22 直连正常，push 不需要代理。
-- 数据更新：`./ensure-data.sh`（增量；FT_PROXY 环境变量可覆盖代理）。
+- 数据更新：`./ensure-data.sh`（增量；FT_PROXY 环境变量可覆盖代理）；跑完接 `data_check.py`
+  校验接缝。2026-09-21 起全套 `.sh` 工具为纯 bash 内建 + venv python 实现。
 
 ## 常用命令
 
@@ -48,6 +49,7 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/arm_stats.py --pool top5          # 单臂统计质量表（逐笔 t 检验+自举 CI+集中度）
 .venv/bin/python user_data/scripts/tier_b_eval.py --pool top5        # Tier B 增量门禁（--arms 可加 CrashBuyV2 等）
 ./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
+.venv/bin/python user_data/scripts/data_check.py --pools top10,core,volume   # 数据接缝校验（最新时间戳/缺口/重复；退出码可作 cron 告警）
 
 # paper forward-test（V2 进行中 + FS 组合臂 2026-08-29 起）
 ./user_data/scripts/paper_start.sh        # V2 启动（内置 SHA 校验，不匹配拒绝启动）
@@ -108,11 +110,12 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - 文档"钱包口径回撤" = `max_relative_drawdown`。
 - dry-run DB 路径要显式配置（`db_url`），默认落在 CWD。
 - 回测不含滑点；摩擦测试用 `--fee` 覆盖。
-- **`ensure-data.sh` 在受限 shell 里跑不了**：它开头用 `dirname`、解析币池用 `sed/tr`，而某些会话
-  （如 WorkBuddy 内置 bash）PATH 里没有这些命令，直接调用会 `command not found`。变通：用
-  `.venv/Scripts/python.exe` 写 `subprocess` 调 `freqtrade download-data`，代理用 `os.environ`
-  注入 `https_proxy/http_proxy=http://127.0.0.1:7897`（download-data 路径实测认这两个变量）。
-  同理 `git push | tail` 这类管道会因缺 `tail` 报 exit 127，改用 python 过滤输出。
+- **`.sh` 工具链已加固（2026-09-21）**：ensure-data / refresh_all / paper_start* / h8c_paper_start
+  全部改为纯 bash 内建 + venv python，不再依赖 dirname/sed/tr/cut/shasum/mkdir/nohup/cat/date，
+  受限 shell（如 WorkBuddy 内置 bash，PATH 无基础命令）可直接运行；SHA 校验用 python hashlib，
+  与 shasum 结果一致（四个冻结 SHA 已实测比对通过）。但**临时拼的命令行**仍会踩 PATH 缺失
+  （ls/grep/tail/cat 等）——过滤输出用 `python -c`；且 `for` 循环等复合结构会触发沙箱
+  wsl.exe 黑名单，一律内联展开，不要写循环。
 - 口径速查：`bt_summary.py` 输出 `ddW`（钱包口径 `max_relative_drawdown`，文档引用这个）与
   `ddA`（账户口径 `max_drawdown_account`，数值明显偏小）。二者在满仓复利下可差 12pp
   （同一次回测 32.1% vs 20.2%），**勿混用、勿只看 ddA**。

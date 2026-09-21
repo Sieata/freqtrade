@@ -5,8 +5,12 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# 纯 bash 定位脚本目录（不依赖 dirname，受限 shell 也可运行；2026-09-21 加固）
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in */*) ;; *) SELF="./$SELF" ;; esac
+ROOT="$(cd "${SELF%/*}/../.." && pwd)"
 PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
 CONFIG="$ROOT/user_data/config_paper_v2.json"
 STRATEGY="WeekendReverseV2"
 LOGDIR="$ROOT/user_data/logs"
@@ -18,7 +22,8 @@ FROZEN_SHA="1b90c90bb7873500a30e8f821713935f497a018d28736596fdaa6f97743b46d1"
 [ -f "$CONFIG" ] || { echo "[!] config not found: $CONFIG" >&2; exit 1; }
 
 # 1. 策略完整性：当前文件必须等于冻结快照（防止 forward-test 期间被改动）
-CUR_SHA=$(shasum -a 256 "$ROOT/user_data/strategies/$STRATEGY.py" | cut -d' ' -f1)
+#    用 venv python 算 SHA256（不依赖 shasum/cut，跨平台一致）
+CUR_SHA=$("$PY" -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$ROOT/user_data/strategies/$STRATEGY.py")
 if [ "$CUR_SHA" != "$FROZEN_SHA" ]; then
     echo "[!] $STRATEGY.py SHA256 mismatch — forward-test 作废 (paper/FREEZE_V2.md)" >&2
     echo "    expected: $FROZEN_SHA" >&2
@@ -33,11 +38,11 @@ if [ "$FT_PROXY" != "none" ]; then
     export https_proxy="$FT_PROXY" http_proxy="$FT_PROXY"
 fi
 
-mkdir -p "$LOGDIR"
+"$PY" -c "import os,sys;os.makedirs(sys.argv[1],exist_ok=True)" "$LOGDIR"
 cd "$ROOT"   # 保证相对路径(db_url/logs)统一解析到项目根
 
-# 3. 后台启动 dry-run
-nohup "$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
+# 3. 后台启动 dry-run（输出已重定向到日志，disown 防 SIGHUP，无需 nohup）
+"$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
     --logfile "$LOGFILE" > "$LOGDIR/paper_v2_stdout.log" 2>&1 &
 PID=$!
 disown

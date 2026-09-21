@@ -13,10 +13,16 @@
 #
 # 网络说明：本机直连 binance API 不通，走系统代理 127.0.0.1:7897（Clash）。
 # 若代理端口不同，用 FT_PROXY 环境变量覆盖；代理关闭时用 FT_PROXY=none 直连。
+#
+# 可移植性（2026-09-21 加固）：全脚本只用 bash 内建 + venv python，
+# 不依赖 dirname/sed/tr 等外部命令（受限 shell 的 PATH 里没有这些）。
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+# 纯 bash 定位脚本目录（不依赖 dirname）
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in */*) ;; *) SELF="./$SELF" ;; esac
+ROOT="$(cd "${SELF%/*}" && pwd)"
 # Windows(Git Bash) 的 venv 布局是 Scripts/python.exe，Unix 是 bin/python
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
@@ -46,8 +52,9 @@ if [ $# -ge 1 ]; then
         exit 1
     fi
     PAIRS=()
-    while IFS= read -r raw; do
-        line="$(printf '%s' "$raw" | sed 's/#.*//' | tr -d ' \t\r')"
+    while IFS= read -r raw || [ -n "$raw" ]; do
+        line="${raw%%#*}"              # 去行内注释（替代 sed）
+        line="${line//[[:space:]]/}"   # 去全部空白含 \r（替代 tr）
         if [ -n "$line" ]; then
             PAIRS+=("$line")
         fi

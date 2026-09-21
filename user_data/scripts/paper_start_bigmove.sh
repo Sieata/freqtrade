@@ -1,13 +1,17 @@
 #!/bin/bash
 # BigMoveV1 forward-test launcher (paper trading / dry-run) — macOS/Linux 版
-# 用法（项目根目录）: ./user_data/scripts/paper_start_fs.sh
+# 用法（项目根目录）: ./user_data/scripts/paper_start_bigmove.sh
 # 前提: 数据已就绪（./ensure-data.sh user_data/universe/pairs_core.txt）；与 V2 paper
-#       可同机并行（独立 config/db/端口 8082），判据见 user_data/paper/FREEZE_FS.md
+#       可同机并行（独立 config/db/端口 8082），判据见 user_data/paper/FREEZE_BIGMOVE.md
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# 纯 bash 定位脚本目录（不依赖 dirname，受限 shell 也可运行；2026-09-21 加固）
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in */*) ;; *) SELF="./$SELF" ;; esac
+ROOT="$(cd "${SELF%/*}/../.." && pwd)"
 PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
 CONFIG="$ROOT/user_data/config_paper_bigmove.json"
 STRATEGY="BigMoveV1"
 LOGDIR="$ROOT/user_data/logs"
@@ -18,10 +22,10 @@ FROZEN_SHA="8d337d365356c87db9e7e0f831cbc479eb444ef1a11958a3cf16aecdbf917380"
 [ -x "$PY" ] || { echo "[!] python not found: $PY" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "[!] config not found: $CONFIG" >&2; exit 1; }
 
-# 1. 策略完整性：当前文件必须等于冻结快照（防止 forward-test 期间被改动）
-CUR_SHA=$(shasum -a 256 "$ROOT/user_data/strategies/$STRATEGY.py" | cut -d' ' -f1)
+# 1. 策略完整性：当前文件必须等于冻结快照（用 venv python 算 SHA256，不依赖 shasum/cut）
+CUR_SHA=$("$PY" -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$ROOT/user_data/strategies/$STRATEGY.py")
 if [ "$CUR_SHA" != "$FROZEN_SHA" ]; then
-    echo "[!] $STRATEGY.py SHA256 mismatch — forward-test 作废 (paper/FREEZE_FS.md)" >&2
+    echo "[!] $STRATEGY.py SHA256 mismatch — forward-test 作废 (paper/FREEZE_BIGMOVE.md)" >&2
     echo "    expected: $FROZEN_SHA" >&2
     echo "    current:  $CUR_SHA" >&2
     exit 1
