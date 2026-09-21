@@ -67,6 +67,9 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - **TOP5 蓝筹参照池（2026-09-21）**：`--pool top5`（BTC/ETH/BNB/XRP/SOL）= TOP10 的纯蓝筹子集，
   用于剥离中盘贡献（TOP10 的利润有相当比例来自 ZEC/DOGE/XMR/TRX）。只作**描述性复核**：
   5 品种下"≥80% 品种盈利"= 最多 1 个品种能亏，容错极窄，结论别当独立验证用。
+- **TOP2 双雄池（2026-09-21）**：`--pool top2`（只 BTC/ETH）= 分散度极限压力测试，
+  **非实盘建议**。实测：V2 收益缩到 TOP10 的 1/10、TEST 段 p 从 1.1e-8 掉到 0.081（不显著）、
+  最大品种占比升到 57~70%。2 品种下门禁"≥80% 品种盈利"= 两个都得赚，容错为 0，别与 TOP5/TOP10 横比。
 - 泛化验证一律独立口径（固定 $1,000/笔，validate_strategy.py 内置）；复利口径只用于定版后单池回测。
 - VAL 报告必看单年集中度，防新币单年 pump 假 edge（ZEC/BANK 教训）。
 - **展示规范（2026-08-29，权威定义：STRATEGY_WORKFLOW 第〇节 0.4）**：凡展示 PnL——
