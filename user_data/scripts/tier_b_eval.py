@@ -36,9 +36,27 @@ def load_pool(pool):
     return pairs, int(len(pairs) * 1.2 * STAKE)
 
 
-def load_leg_zips(strategy):
-    """从该策略最新的验证报告解析 TOP10 两腿 zip（单一并发口径，避免混入其他运行的交易）。"""
-    r = sorted(REPORTS.glob(f"validate_{strategy}_*.md"), key=lambda p: p.stat().st_mtime)[-1]
+def load_leg_zips(strategy, pool=None):
+    """从该策略的验证报告解析两腿 zip（单一并发口径，避免混入其他运行的交易）。
+
+    pool 给定时只接受该池口径的报告（报告标题为 `## POOL × TEST`）——同一策略
+    的多次验证会留下不同池的报告，取"最新一份"会静默混池（例如 V2 最新是 TOP10
+    而 FS 最新是 TOP2）。不给 pool 才退回取最新一份。
+    """
+    cands = sorted(REPORTS.glob(f"validate_{strategy}_*.md"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    if not cands:
+        raise SystemExit(f"{strategy}: 无任何验证报告")
+    r = cands[0]
+    if pool:
+        want = pool.upper()
+        for cand in cands:
+            if re.search(rf"^## {want} × (TEST|VAL)", cand.read_text(encoding="utf-8"), re.M):
+                r = cand
+                break
+        else:
+            raise SystemExit(f"{strategy}: 找不到 {want} 口径的验证报告"
+                             f"（现有: {[c.name for c in cands[:3]]}）")
     txt = r.read_text(encoding="utf-8")
     zips = {}
     for pat, key in [(r"## \w+ × TEST（20220101-20240828）", "TEST"),
@@ -50,8 +68,8 @@ def load_leg_zips(strategy):
     return zips["TEST"], zips["VAL"], r.name
 
 
-def load_arm(strategy):
-    zt, zv, report = load_leg_zips(strategy)
+def load_arm(strategy, pool=None):
+    zt, zv, report = load_leg_zips(strategy, pool)
     parts = []
     for zname in (zt, zv):
         with zipfile.ZipFile(BT / zname) as z:

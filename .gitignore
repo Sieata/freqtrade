@@ -148,3 +148,8 @@ user_data/data/binance/futures_metrics/*
 !user_data/data/binance/quarterly/
 !user_data/data/binance/h8c_paper/
 !user_data/data/binance/*-1h.feather
+
+# --- 项目私有（2026-09-21）---
+# AI 会话工作目录（位于 freqtrade 框架目录内，非项目产物）
+freqtrade/.zcode/
+# .workbuddy/ 是有意入库的：项目记忆 + 项目级 skill（paper 设备拉代码后可直接复用）
