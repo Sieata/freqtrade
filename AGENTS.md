@@ -48,6 +48,8 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 #   --pool top5 / top10 / core / volume / both（top5=纯蓝筹 BTC/ETH/BNB/XRP/SOL，剥离中盘贡献用）
 .venv/bin/python user_data/scripts/arm_stats.py --pool top5          # 单臂统计质量表（逐笔 t 检验+自举 CI+集中度）
 .venv/bin/python user_data/scripts/tier_b_eval.py --pool top5        # Tier B 增量门禁（--arms 可加 CrashBuyV2 等）
+.venv/bin/python user_data/scripts/portfolio_4arm.py --pool top10    # 四臂组合（V2+FS+OI+BM）sleeve 模型：逐年/相关矩阵/LOO
+.venv/bin/python user_data/scripts/funding_spread_scan.py --deep 56  # 跨所费差扫描（币安×Hyperliquid + 14天持续性深查）
 ./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
 .venv/bin/python user_data/scripts/data_check.py --pools top10,core,volume   # 数据接缝校验（最新时间戳/缺口/重复；退出码可作 cron 告警）
 
@@ -73,6 +75,13 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - **TOP10 市值池优先（2026-08-29 用户纪律）**：策略评估第一口径用 `--pool top10`
   （`user_data/universe/pairs_top10.txt`）——实盘优先跑市值 Top10，垃圾币是噪音，
   TOP10 不过则其他品种好看无意义。CORE50/VOLUME 只作泛化面参考；年化等汇总数字先看 TOP10。
+- **报告取数必须显式对齐池（2026-09-21）**：同一策略会留下多份不同池的验证报告，
+  `load_leg_zips` 原按"最新一份"取，组合/多臂脚本会**静默混池**（实测 V2 最新是 TOP10、
+  FS/OI/BM 最新是 TOP2）。现 `load_arm(strategy, pool)` 按 `## POOL × TEST` 标题匹配，
+  找不到直接报错。任何按策略名读报告的脚本都要传 pool。
+- **模块级全局的哑失败（2026-09-21）**：`tier_b_eval.POOL` 是模块级变量，只在其 `main()` 里
+  按 `--pool` 赋值。外部脚本 import `load_arm` 而不设 `POOL` → 空集过滤掉全部交易，
+  输出 0 笔且**不报错**。`portfolio_4arm.py` 已修（加 `--pool`），同类脚本照此自查。
 - **TOP5 蓝筹参照池（2026-09-21）**：`--pool top5`（BTC/ETH/BNB/XRP/SOL）= TOP10 的纯蓝筹子集，
   用于剥离中盘贡献（TOP10 的利润有相当比例来自 ZEC/DOGE/XMR/TRX）。只作**描述性复核**：
   5 品种下"≥80% 品种盈利"= 最多 1 个品种能亏，容错极窄，结论别当独立验证用。
