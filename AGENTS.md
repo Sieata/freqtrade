@@ -27,6 +27,11 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 # 结果速览 / 币池独立口径复核
 .venv/bin/python user_data/scripts/bt_summary.py <result.zip>
 .venv/bin/python user_data/scripts/pool_review.py <result.zip> --worst 10
+.venv/bin/python user_data/scripts/exit_anatomy.py <result.zip>   # 出场结构/浮亏深度/止损反事实/保本胜率
+
+# 仓位轴扫描（比例仓位只能靠临时 config，CLI 无 --tradable-balance-ratio）
+.venv/bin/python user_data/scripts/sizing_sweep.py --strategy WeekendReverseV2 \
+  --timerange 20220101-20240828 --pool top10
 
 # 标准化验证（2026-08-28 起新研究强制，口径详见 STRATEGY_WORKFLOW.md 第〇节）
 .venv/bin/python user_data/scripts/time_splits.py                    # 打印冻结的 TEST/VAL timerange
