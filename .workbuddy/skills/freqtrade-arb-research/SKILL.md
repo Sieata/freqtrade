@@ -4,6 +4,11 @@ description: 在本 freqtrade 仓库做「套利/市场中性」研究的固定�
 agent_created: true
 ---
 
+> **⚠️ 2026-10-07 项目收缩：套利/市场中性方向（H7/H8/H8c/H10、21.1 期现资金费、21.3 跨品种费率分散）已收线（用户批准）。**
+> 相关脚本已移至 `user_data/scripts/archive/`（下文路径需加 `archive/`，且归档脚本未迁移到
+> research_lib，复用前先迁移）。**未经用户明确要求，不要重启该方向的研究。**
+> 项目当前目标：围绕 WeekendReverseV2 + OIFlushV2 收敛到可实盘（见 RESEARCH.md 顶部「当前状态」）。
+
 # 套利/市场中性研究套路（freqtrade 仓库）
 
 ## 先读，别重复劳动

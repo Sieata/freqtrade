@@ -4,6 +4,11 @@ description: 在本 freqtrade 仓库做「单品种方向性策略（CTA/动量/
 agent_created: true
 ---
 
+> **⚠️ 2026-10-07 项目收缩：单品种方向性（CTA/动量/趋势）方向已收线（用户批准）。**
+> 相关脚本已移至 `user_data/scripts/archive/`（下文路径需加 `archive/`，且归档脚本未迁移到
+> research_lib，复用前先迁移）。**未经用户明确要求，不要重启该方向的研究。**
+> 项目当前目标：围绕 WeekendReverseV2 + OIFlushV2 收敛到可实盘（见 RESEARCH.md 顶部「当前状态」）。
+
 # 单品种方向性策略（CTA）可行性研究套路（freqtrade 仓库）
 
 ## 先读
