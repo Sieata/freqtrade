@@ -94,6 +94,13 @@ def test_span_uses_backtest_window_not_trades(sandbox):
     assert rl.result_span_years(stats) == pytest.approx(2.65, abs=0.01)
 
 
+def test_result_wallet(sandbox):
+    # 0.4 v2：逐年 % 分母 = 回测钱包（独立口径回测 starting_balance = 池规模×1.2×$1,000）
+    assert rl.result_wallet({"starting_balance": 12000.0}) == 12000
+    assert rl.result_wallet({"dry_run_wallet": 6000}) == 6000
+    assert rl.result_wallet({}) == rl.STAKE
+
+
 # ---------------------------------------------------------------- 报告定位（防混池）
 def test_find_validation_requires_pool(sandbox):
     with pytest.raises(ValueError):

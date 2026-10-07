@@ -194,7 +194,7 @@ def gate_check(split, portfolio, conc):
     return res
 
 
-def fmt_table(pairs, years, cell, cnt, wins):
+def fmt_table(pairs, years, cell, cnt, wins, wallet):
     hdr = f"{'pair':<10}" + "".join(f"{y:>11}" for y in years) + f"{'total':>11}{'n':>5}{'win%':>7}"
     lines = [hdr, "-" * len(hdr)]
     row_total = defaultdict(float)
@@ -211,9 +211,10 @@ def fmt_table(pairs, years, cell, cnt, wins):
     lines.append("-" * len(hdr))
     lines.append(f"{'TOTAL':<10}" + "".join(f"{row_total[y]:>11,.0f}" for y in years)
                  + f"{sum(row_total.values()):>11,.0f}")
-    # 逐年收益率（2026-08-29 口径：每年重置 $1,000 本金，当年利润 ÷ 1000 = 当年收益率%）
-    lines.append(f"{'TOTAL%':<10}" + "".join(f"{row_total[y] / STAKE * 100:>10.1f}%" for y in years)
-                 + f"{sum(row_total.values()) / STAKE * 100:>10.1f}%")
+    # 逐年收益率（STRATEGY_WORKFLOW 0.4 v2，2026-10-07）：当年利润 ÷ 钱包（池规模×1.2×$1,000），
+    # 每年重置钱包。旧口径 ÷$1,000 已退役（10 品种池会显示 +300% 级数字，不对应任何真实资金）
+    lines.append(f"{'TOTAL%':<10}" + "".join(f"{row_total[y] / wallet * 100:>10.1f}%" for y in years)
+                 + f"{sum(row_total.values()) / wallet * 100:>10.1f}%")
     return "\n".join(lines)
 
 
@@ -293,10 +294,6 @@ def main():
                f"（平均并发 {portfolio['avg_conc']:.1f} 仓，{portfolio['years']:.2f} 年）"
                if "ann_wallet" in portfolio else "年化: 无交易")
         pairs_list, years_list, cell_map = table[0], table[1], table[2]
-        yearly_pct = " ".join(
-            f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / STAKE * 100:+.1f}%"
-            for y in years_list)
-        # 同一利润按钱包（池规模×1.2×$1,000）表达：÷$1,000 口径在 10 品种池里会显示 +300% 级数字
         wallet = len(have) * 1.2 * STAKE
         yearly_wallet = " ".join(
             f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / wallet * 100:+.1f}%"
@@ -307,10 +304,9 @@ def main():
               f"win%={portfolio['win_rate'] * 100:.1f}  PF={portfolio['pf']:.2f}  "
               f"dd={portfolio['dd'] * 100:.1f}%  盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}")
         print(ann)
-        print(f"逐年收益率（每年重置 $1,000 本金，当年利润÷1000）: {yearly_pct}")
-        print(f"逐年收益率（钱包口径，当年利润÷${wallet:,.0f}，首尾年为不足年）: {yearly_wallet}")
-        print("独立口径品种×年度（$1,000/笔）:")
-        print(fmt_table(*table))
+        print(f"逐年收益率（当年利润÷钱包 ${wallet:,.0f}，每年重置；首尾年为不足年）: {yearly_wallet}")
+        print("独立口径品种×年度（$1,000/笔；TOTAL% = ÷钱包）:")
+        print(fmt_table(*table, wallet))
         for name, verdict, detail in gates:
             mark = {"PASS": "✅", "FAIL": "❌", "WARN": "⚠️ "}[verdict]
             print(f"  {mark} {name}: {detail}")
@@ -327,10 +323,9 @@ def main():
                    f"win%={portfolio['win_rate'] * 100:.1f} PF={portfolio['pf']:.2f} "
                    f"dd={portfolio['dd'] * 100:.1f}% 盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}",
                    f"**{ann}**",
-                   f"逐年收益率（每年重置 $1,000 本金）: {yearly_pct}",
-                   f"逐年收益率（钱包口径 ÷${wallet:,.0f}，首尾年不足年）: {yearly_wallet}",
+                   f"逐年收益率（当年利润÷钱包 ${wallet:,.0f}，每年重置；首尾年不足年）: {yearly_wallet}",
                    "",
-                   "```", fmt_table(*table), "```", "", "| 门禁 | 结果 | 说明 |", "|---|---|---|"]
+                   "```", fmt_table(*table, wallet), "```", "", "| 门禁 | 结果 | 说明 |", "|---|---|---|"]
         report += [f"| {name} | {verdict} | {detail} |" for name, verdict, detail in gates]
         report.append("")
 

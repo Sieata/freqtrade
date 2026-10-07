@@ -98,6 +98,14 @@ def result_span_years(stats):
     return max((b - a).total_seconds() / 86400 / 365.25, 1e-9)
 
 
+def result_wallet(stats):
+    """回测钱包（逐年收益率分母，STRATEGY_WORKFLOW 0.4 v2）。
+
+    run_backtest 跑的独立口径回测 starting_balance = 池规模×1.2×$1,000；其他 zip 取其启动余额。
+    """
+    return float(stats.get("starting_balance") or stats.get("dry_run_wallet") or STAKE)
+
+
 def trades_frame(trades, seg=None):
     df = pd.DataFrame(trades)
     if df.empty:

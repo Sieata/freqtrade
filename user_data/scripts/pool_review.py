@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from research_lib import STAKE, read_result  # noqa: E402
+from research_lib import STAKE, read_result, result_wallet  # noqa: E402
 
 
 def load(zip_path):
@@ -69,9 +69,10 @@ def main():
     print("-" * len(hdr))
     print(f"{'TOTAL':<8}" + "".join(f"{row_total[y]:>12,.0f}" for y in years)
           + f"{sum(row_total.values()):>12,.0f}{len(trades):>6}{100*sum(1 for t in trades if t['profit_ratio']>0)/len(trades):>8.1f}")
-    # 逐年收益率（2026-08-29 口径：每年重置 $1,000 本金，当年利润 ÷ STAKE = 当年收益率%）
-    print(f"{'TOTAL%':<8}" + "".join(f"{row_total[y] / STAKE * 100:>11.1f}%" for y in years)
-          + f"{sum(row_total.values()) / STAKE * 100:>11.1f}%")
+    # 逐年收益率（STRATEGY_WORKFLOW 0.4 v2）：当年利润 ÷ 回测钱包，每年重置
+    wallet = result_wallet(raw)
+    print(f"{'TOTAL%':<8}" + "".join(f"{row_total[y] / wallet * 100:>11.1f}%" for y in years)
+          + f"{sum(row_total.values()) / wallet * 100:>11.1f}%   (÷ wallet ${wallet:,.0f})")
 
     # 集中度提示
     pair_tot = {p: sum(cell.get((p, y), 0.0) for y in years) for p in pairs}

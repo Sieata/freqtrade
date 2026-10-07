@@ -1,6 +1,6 @@
 """四臂组合回测（V2 引擎 + FS/OIFlush/BigMove 事件臂，sleeve 模型）。
 
-每年重置本金 = 臂数 × $1,000；输出：单臂/组合逐年收益率、月度统计、相关矩阵、
+逐年 = 当年利润 $ 与 ÷钱包%（单臂钱包 = 池钱包；组合 = 臂数 × 池钱包，STRATEGY_WORKFLOW 0.4 v2）；输出：单臂/组合逐年收益率、月度统计、相关矩阵、
 逐臂边际贡献（leave-one-out）、并发峰值，以及**配比样本外检验**。
 用法: .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py [--pool top10]
       .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py --arms OIFlushV2   # V2 + 指定臂
@@ -27,7 +27,6 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    STAKE,
     load_arm,
     max_dd,
     monthly_series,
@@ -40,6 +39,7 @@ from tier_b_eval import leg_window  # noqa: E402
 
 ARMS = ["WeekendReverseV2", "FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
 SHORT = {"WeekendReverseV2": "V2", "FundingSqueezeV1L": "FS", "OIFlushV2": "OI", "BigMoveV1": "BM"}
+WALLET = 12000.0  # 单臂钱包，main 按 --pool 设定
 CI_FLOOR = -1.0  # 配比纪律：VAL ΔSharpe 90%CI 下界（STRATEGY_WORKFLOW 4.3）
 
 
@@ -73,20 +73,19 @@ def report(parts, seg, window):
     lo, hi = window
     years = (hi - lo).total_seconds() / 86400 / 365.25
     all_df = pd.concat(parts.values())
-    base = len(parts) * STAKE
     monthly = pd.DataFrame({k: monthly_series(d, lo, hi) for k, d in parts.items()})
     comb = monthly.sum(axis=1)
 
     print(f"\n{'=' * 96}\n【{seg} {lo:%Y-%m-%d}→{hi:%Y-%m-%d}，{years:.2f} 年，{len(monthly)} 个月】"
-          f"基数 = {len(parts)} 臂 × ${STAKE:,.0f} = ${base:,.0f}/年\n{'=' * 96}")
+          f"钱包 = {len(parts)} 臂 × ${WALLET:,.0f}\n{'=' * 96}")
     for name, d in parts.items():
         yr = d.groupby(d["close_dt"].dt.year)["profit$"].sum()
-        ys = " ".join(f"{y}:{v / STAKE * 100:+.0f}%" for y, v in yr.items())
+        ys = " ".join(f"{y}:{v:+,.0f}$({v / WALLET * 100:+.0f}%)" for y, v in yr.items())
         print(f"{name:<4} {len(d):>5}笔  年均 {d['profit$'].sum() / years:>+8,.0f}$  "
               f"Sharpe {sharpe_m(monthly[name]):>5.2f}  逐年 {ys}  并发峰 {peak_conc(d)}"
               + (f"  与V2同品种持仓重叠 {hold_overlap(d, parts['V2']):.0f}%" if name != "V2" else ""))
     yr = all_df.groupby(all_df["close_dt"].dt.year)["profit$"].sum()
-    ys = " ".join(f"{y}:{v / base * 100:+.0f}%" for y, v in yr.items())
+    ys = " ".join(f"{y}:{v:+,.0f}$({v / (WALLET * len(parts)) * 100:+.0f}%)" for y, v in yr.items())
     print(f"组合 {len(all_df):>5}笔  年均 {comb.sum() / years:>+8,.0f}$  Sharpe {sharpe_m(comb):>5.2f}  "
           f"逐年 {ys}  最差月 {comb.min():>+,.0f}$  负月 {(comb < 0).mean() * 100:.0f}%  "
           f"月度回撤 {max_dd(comb):>+,.0f}$  并发峰 {peak_conc(all_df)}")
@@ -159,7 +158,9 @@ def main():
     ap.add_argument("--arms", default="", help="逗号分隔事件臂（V2 恒为基准），默认 FS,OI,BM 全部")
     args = ap.parse_args()
     arms = ["WeekendReverseV2"] + ([a for a in args.arms.split(",") if a] or ARMS[1:])
-    print(f"池 = {args.pool}  钱包口径 = ${pool_wallet(args.pool):,.0f}")
+    global WALLET
+    WALLET = pool_wallet(args.pool)
+    print(f"池 = {args.pool}  单臂钱包 = ${WALLET:,.0f}")
     arm_dfs = {}
     for arm in arms:
         df, rep = load_arm(arm, args.pool)

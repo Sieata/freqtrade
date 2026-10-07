@@ -2,7 +2,7 @@
 
 用法: .venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB> [--names A,B] [--stake 1000]
 
-每个 zip 取第一个策略的 trades 明细做臂间对照（独立口径 $stake/笔，pp = $利润/stake*100）：
+每个 zip 取第一个策略的 trades 明细做臂间对照（独立口径 $stake/笔；% = $利润 ÷ 该 zip 回测钱包）：
   1) 总览（笔数/总$/均值/胜率/PF）与持仓区间；
   2) 逐年 PnL 对照（按开仓年份归组）；
   3) 品种分布对照；
@@ -19,7 +19,7 @@ import pandas as pd
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from research_lib import read_result  # noqa: E402
+from research_lib import read_result, result_wallet  # noqa: E402
 
 
 def _naive(x):
@@ -45,6 +45,7 @@ def load_arm(path, stake):
     df = pd.DataFrame(rows)
     if len(df):
         df = df.sort_values("open").reset_index(drop=True)
+    df.attrs["wallet"] = result_wallet(s)
     return s.get("strategy_name", "?"), df
 
 
@@ -66,16 +67,17 @@ def yearly_table(dfa, dfb, la, lb, stake):
     years = sorted(set(dfa["open"].dt.year) | set(dfb["open"].dt.year))
     ga = dfa.groupby(dfa["open"].dt.year)["profit"].agg(["count", "sum"])
     gb = dfb.groupby(dfb["open"].dt.year)["profit"].agg(["count", "sum"])
-    print("\n== 逐年 PnL（按开仓年份，$ / pp = $÷stake×100） ==")
-    print(f"{'年份':<6} {la + ' n':>7} {la + ' $':>10} {la + ' pp':>9}   "
-          f"{lb + ' n':>7} {lb + ' $':>10} {lb + ' pp':>9}")
+    wa, wb = dfa.attrs.get("wallet", stake), dfb.attrs.get("wallet", stake)
+    print(f"\n== 逐年 PnL（按开仓年份，$ / % = $÷回测钱包：{la} ${wa:,.0f} · {lb} ${wb:,.0f}） ==")
+    print(f"{'年份':<6} {la + ' n':>7} {la + ' $':>10} {la + ' %':>9}   "
+          f"{lb + ' n':>7} {lb + ' $':>10} {lb + ' %':>9}")
     for y in years:
         ca, sa = (ga.loc[y, "count"], ga.loc[y, "sum"]) if y in ga.index else (0, 0.0)
         cb, sb = (gb.loc[y, "count"], gb.loc[y, "sum"]) if y in gb.index else (0, 0.0)
-        print(f"{y:<6} {ca:>7} {sa:>+10,.0f} {sa / stake * 100:>+9.1f}   "
-              f"{cb:>7} {sb:>+10,.0f} {sb / stake * 100:>+9.1f}")
-    print(f"{'合计':<6} {len(dfa):>7} {dfa.profit.sum():>+10,.0f} {dfa.profit.sum() / stake * 100:>+9.1f}   "
-          f"{len(dfb):>7} {dfb.profit.sum():>+10,.0f} {dfb.profit.sum() / stake * 100:>+9.1f}")
+        print(f"{y:<6} {ca:>7} {sa:>+10,.0f} {sa / wa * 100:>+9.1f}   "
+              f"{cb:>7} {sb:>+10,.0f} {sb / wb * 100:>+9.1f}")
+    print(f"{'合计':<6} {len(dfa):>7} {dfa.profit.sum():>+10,.0f} {dfa.profit.sum() / wa * 100:>+9.1f}   "
+          f"{len(dfb):>7} {dfb.profit.sum():>+10,.0f} {dfb.profit.sum() / wb * 100:>+9.1f}")
 
 
 def symbol_table(dfa, dfb, la, lb):

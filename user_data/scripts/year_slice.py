@@ -24,7 +24,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, one_sided_t_p, read_result,
+    ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, one_sided_t_p, read_result, result_wallet,
     run_backtest as _run, trades_frame,
 )
 
@@ -67,6 +67,7 @@ def stats_from_zip(zip_path):
         "monthly": mon,
         "pair_pnl": share.sort_values(ascending=False),
         "end": stats.get("backtest_end"),
+        "wallet": result_wallet(stats),
     }
 
 
@@ -138,7 +139,7 @@ def main():
             if s is None:
                 print(f"{arm:<19} 无交易")
                 continue
-            print(f"{arm:<19}{s['n']:>5}{s['total']:>9,.0f}{s['total']/STAKE*100:>7.0f}%"
+            print(f"{arm:<19}{s['n']:>5}{s['total']:>9,.0f}{s['total']/s['wallet']*100:>7.1f}%"
                   f"{s['mean']:>8,.1f}{s['win']:>7.1f}{s['pf']:>6.2f}{s['p']:>10.2e}"
                   f"{'[' + format(s['ci'][0], '+,.0f') + ',' + format(s['ci'][1], '+,.0f') + ']':>17}"
                   f"{s['ex_best']:>11,.0f}{s['top_pair'] + ' ' + format(s['top_share'], '.0f') + '%':>13}"

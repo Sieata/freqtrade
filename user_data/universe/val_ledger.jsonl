@@ -2,3 +2,7 @@
 {"date": "2026-10-07", "strategy": "BigMoveV1", "sha16": "8d337d365356c87d", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-24-15.zip"]}
 {"date": "2026-10-07", "strategy": "FundingSqueezeV1L", "sha16": "091486c816dfd392", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-24-50.zip"]}
 {"date": "2026-10-07", "strategy": "OIFlushV2", "sha16": "d714e0922be08493", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-25-13.zip"]}
+{"date": "2026-10-07", "strategy": "WeekendReverseV2", "sha16": "1b90c90bb7873500", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-43-33.zip"]}
+{"date": "2026-10-07", "strategy": "BigMoveV1", "sha16": "8d337d365356c87d", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-43-57.zip"]}
+{"date": "2026-10-07", "strategy": "FundingSqueezeV1L", "sha16": "091486c816dfd392", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-44-32.zip"]}
+{"date": "2026-10-07", "strategy": "OIFlushV2", "sha16": "d714e0922be08493", "pools": ["top10"], "zips": ["backtest-result-2026-10-07_14-44-54.zip"]}

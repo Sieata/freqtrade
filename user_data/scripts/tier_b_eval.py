@@ -11,7 +11,8 @@
          与配比无关。门禁5 用 V2 钱包当分母，等于新臂资金免费——任何赚钱的臂都能过，
          V2 自我复制实测 +19pp 通过；5b 下复制品 SR_臂 = 1.0 × SR_V2，不严格大于 → 不过。
   门禁6 最差月归一: 合并最差月 ÷ 双臂资金(2×$1,000) vs V2 最差月 ≤ 1.5
-  门禁7 负年: VAL 段逐年收益率（÷$1,000）负年 ≤ 1 且最深 ≥ -15%
+  门禁7 负年: VAL 段逐年利润（每笔 $1,000）负年 ≤ 1 且最深 ≥ -$150/年
+         （阈值与批准时的"÷$1,000 ≥ -15%"等价；0.4 v2 起 % 一律指 ÷钱包，故改用 $ 表达）
 
 2026-10-07 修正（框架审计）：
   - main/eval_arm 调 load_arm 从未传 pool → 一直按"最新一份报告"取数，静默混池仍在；
@@ -35,7 +36,7 @@ from research_lib import (  # noqa: E402
 
 BASE = "WeekendReverseV2"
 ARMS = ["FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
-G2_MAX_DD, G3_TOP, G3_YEAR, G4_MAX, G6_MAX, G7_NEG_MAX, G7_DEPTH = 0.30, 0.50, 0.80, 30.0, 1.5, 1, -15.0
+G2_MAX_DD, G3_TOP, G3_YEAR, G4_MAX, G6_MAX, G7_NEG_MAX, G7_DEPTH = 0.30, 0.50, 0.80, 30.0, 1.5, 1, -150.0
 
 
 def leg_window(strategy, pool, seg):
@@ -150,10 +151,10 @@ def main():
         gates.append(("VAL", "2 回撤", r["val_dd"] <= G2_MAX_DD, f"{r['val_dd']:.1%}"))
         yv = r["VAL"]["yearly"]
         neg = yv[yv < 0]
-        depth = neg.min() / STAKE * 100 if len(neg) else 0.0
+        depth = neg.min() if len(neg) else 0.0
         gates.append(("VAL", "7 负年", len(neg) <= G7_NEG_MAX and depth >= G7_DEPTH,
-                      f"{len(neg)} 个，最深 {depth:+.1f}%  逐年 "
-                      + " ".join(f"{y}:{v / STAKE * 100:+.1f}%" for y, v in yv.items())))
+                      f"{len(neg)} 个，最深 {depth:+,.0f}$  逐年 "
+                      + " ".join(f"{y}:{v:+,.0f}$({v / wallet * 100:+.1f}%)" for y, v in yv.items())))
         for seg, name, ok, detail in sorted(gates, key=lambda g: (g[1], g[0])):
             print(f"  {'✅' if ok else '❌'} [{seg:<4}] 门禁{name}: {detail}")
         print(f"  ·  [描述] 门禁5 组合增量（已降级不判）: TEST {r['TEST']['g5']:+.1f}pp / VAL {r['VAL']['g5']:+.1f}pp")
