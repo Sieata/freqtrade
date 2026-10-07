@@ -1,6 +1,8 @@
 """信号一致性对账（FREEZE_FS 判据：月度实际信号 vs 回测同期预期，偏差 ≤±30%）。
 
-回测侧：策略最新 TOP10 验证报告的交易集 → 每月每对入场数预期表。
+回测侧：策略在 --pool（默认 top10）上最新一份验证报告的交易集 → 每月入场数预期表。
+（2026-10-07 迁 research_lib：旧版取"最新一份报告"不论池，且正则要求「结果:」紧跟标题，
+validate 新增「实际区间:」行后匹配为空——对账会直接崩。）
 live 侧：paper db 的 trades 表 → 实际入场数。
 偏差 =（live − 预期）/ 预期，|偏差| > 30% 的月份标 FLAG——信号断供/体制漂移探测器。
 
@@ -10,51 +12,32 @@ live 侧：paper db 的 trades 表 → 实际入场数。
   .venv/bin/python user_data/scripts/signal_recon.py --strategy FundingSqueezeV1L --selftest
 """
 import argparse
-import json
 import os
-import re
 import sqlite3
-import zipfile
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-BT = ROOT / "user_data" / "backtest_results"
-REPORTS = ROOT / "user_data" / "reports"
-UNIVERSE = ROOT / "user_data" / "universe" / "pairs_top10.txt"
 
-POOL = {line.split("/")[0].strip() for line in UNIVERSE.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#") and "/" in line}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import ROOT, load_arm, pool_bases  # noqa: E402
 
 
-def expected_monthly(strategy):
-    """回测预期：TOP10 验证 TEST+VAL 两腿合并的每月入场数。"""
-    r = sorted(REPORTS.glob(f"validate_{strategy}_*.md"), key=lambda p: p.stat().st_mtime)[-1]
-    txt = r.read_text(encoding="utf-8")
-    rows = []
-    for m in re.finditer(r"## \w+ × (TEST|VAL)（[^）]+）\n结果: `(backtest-result-[0-9_-]+\.zip)`", txt):
-        with zipfile.ZipFile(BT / m.group(2)) as z:
-            for n in z.namelist():
-                if not n.endswith(".json"):
-                    continue
-                d = json.loads(z.read(n))
-                if isinstance(d, dict) and "strategy" in d:
-                    rows.extend(d["strategy"][list(d["strategy"])[0]].get("trades", []))
-    df = pd.DataFrame(rows)
-    df["pair_base"] = df["pair"].str.split("/").str[0]
-    df = df[df["pair_base"].isin(POOL)]
-    df["month"] = pd.to_datetime(df["open_date"], utc=True).dt.strftime("%Y-%m")
-    return df.groupby("month").size().sort_index()
+def expected_monthly(strategy, pool):
+    """回测预期：验证 TEST+VAL 两腿合并的每月入场数（已过滤到池内品种）。"""
+    df, report = load_arm(strategy, pool)
+    print(f"回测来源: {report}")
+    return df.groupby(df["open_dt"].dt.strftime("%Y-%m")).size().sort_index()
 
 
-def live_monthly(db):
+def live_monthly(db, bases):
     con = sqlite3.connect(db)
     rows = con.execute("SELECT pair, open_date FROM trades WHERE is_open IN (0, 1)").fetchall()
     con.close()
     df = pd.DataFrame(rows, columns=["pair", "open_date"])
     df["pair_base"] = df["pair"].str.split("/").str[0]
-    df = df[df["pair_base"].isin(POOL)]
+    df = df[df["pair_base"].isin(bases)]
     df["month"] = pd.to_datetime(df["open_date"], utc=True).dt.strftime("%Y-%m")
     return df.groupby("month").size().sort_index()
 
@@ -63,11 +46,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--strategy", default="FundingSqueezeV1L")
     ap.add_argument("--db", default=None)
+    ap.add_argument("--pool", default="top10")
     ap.add_argument("--selftest", action="store_true", help="用回测交易充当 live 验证管道（偏差应为 0）")
     args = ap.parse_args()
 
-    exp = expected_monthly(args.strategy)
-    print(f"回测预期（{args.strategy} TOP10，{len(exp)} 个月，合计 {exp.sum()} 信号）:")
+    exp = expected_monthly(args.strategy, args.pool)
+    print(f"回测预期（{args.strategy} {args.pool.upper()}，{len(exp)} 个月，合计 {exp.sum()} 信号）:")
     for k, v in exp.items():
         print(f"  {k}: {v}")
 
@@ -79,7 +63,7 @@ def main():
         if not os.path.exists(db):
             print(f"\n[live] db 不存在: {db}（paper 未启动或不在本机）——仅打印预期表")
             return
-        live = live_monthly(db)
+        live = live_monthly(db, pool_bases(args.pool))
 
     print("\n对账（|偏差|>30% = FLAG）:")
     flags = 0

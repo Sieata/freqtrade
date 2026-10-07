@@ -53,6 +53,18 @@ def peak_conc(df):
     return peak
 
 
+def hold_overlap(arm, base):
+    """臂的持仓期间 V2 同品种也在仓的笔数占比（同品种资金/风险叠加参考；原 fs_portfolio_check）。"""
+    if arm.empty or base.empty:
+        return 0.0
+    by_pair = {p: g for p, g in base.groupby("pair")}
+    hit = 0
+    for p, o, c in zip(arm["pair"], arm["open_dt"], arm["close_dt"]):
+        g = by_pair.get(p)
+        hit += g is not None and bool(((g["open_dt"] <= c) & (g["close_dt"] >= o)).any())
+    return hit / len(arm) * 100
+
+
 def seg_parts(arm_dfs, seg, hi):
     return {SHORT.get(a, a): d[(d["seg"] == seg) & (d["close_dt"] <= hi)] for a, d in arm_dfs.items()}
 
@@ -71,7 +83,8 @@ def report(parts, seg, window):
         yr = d.groupby(d["close_dt"].dt.year)["profit$"].sum()
         ys = " ".join(f"{y}:{v / STAKE * 100:+.0f}%" for y, v in yr.items())
         print(f"{name:<4} {len(d):>5}笔  年均 {d['profit$'].sum() / years:>+8,.0f}$  "
-              f"Sharpe {sharpe_m(monthly[name]):>5.2f}  逐年 {ys}  并发峰 {peak_conc(d)}")
+              f"Sharpe {sharpe_m(monthly[name]):>5.2f}  逐年 {ys}  并发峰 {peak_conc(d)}"
+              + (f"  与V2同品种持仓重叠 {hold_overlap(d, parts['V2']):.0f}%" if name != "V2" else ""))
     yr = all_df.groupby(all_df["close_dt"].dt.year)["profit$"].sum()
     ys = " ".join(f"{y}:{v / base * 100:+.0f}%" for y, v in yr.items())
     print(f"组合 {len(all_df):>5}笔  年均 {comb.sum() / years:>+8,.0f}$  Sharpe {sharpe_m(comb):>5.2f}  "
