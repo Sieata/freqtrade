@@ -92,11 +92,13 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   一律从这里 import，禁止再各自复制。`find_validation(strategy, pool)` 的 pool 必填、空池报错；
   validate 现在同时写 `.json` 旁车，下游优先读旁车（旧报告回退解析 markdown）。
   审计修掉的哑失败：① validate 的 VAL 回撤门禁误用 `max_drawdown_account`（偏松，同一回测
-  20% vs 32%）→ 改 `max_relative_drawdown`，**此前 VAL 回撤 PASS 的结论需按新口径复核**；
+  20% vs 32%）→ 改 `max_relative_drawdown`（固定 $1,000/笔口径下两者实测相等，历史门禁结论不受影响）；
   ② tier_b_eval 的 pool 修复只改了函数签名、调用处从未传 pool，混池一直在；③ tier_b_eval
   门禁5 在 TEST 段恒判 ✅；④ 年化分母原为首末笔交易跨度（低频臂虚高）→ 改回测覆盖时长，
   组合脚本统一段长并把 VAL 截到各臂共同最早截止；⑤ portfolio_4arm 硬编码段长 2.657/2.002 年。
   `portfolio_full.py` 已删（被 portfolio_4arm 替代）。
+  月度统计一律用 `research_lib.monthly_series`（全日历，空月记 0），否则低频臂的 Sharpe/相关是噪声。
+  组合结论看 portfolio_4arm 的「配比样本外检验」（权重只在 TEST 估，RESEARCH 26.3）。
 - **VAL 窥视台账 `user_data/universe/val_ledger.jsonl`（入库）**：validate 每次跑 VAL 记一行
   (策略, SHA16, 池)；同名策略换了 SHA 再跑 VAL → 报告出 `VAL 窥视` WARN，该结果不得当独立样本外
   证据。摩擦测试（--fee）不记。台账从 2026-10-07 起算，此前的 VAL 使用史只在 RESEARCH.md。
