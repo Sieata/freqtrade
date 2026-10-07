@@ -15,23 +15,18 @@ max_open_trades = 池内品种数、--cache none）重跑并出表。
   ... --year 2025 --range 20250101-20260101     # 自定区间覆盖整年
 """
 import argparse
-import json
-import os
-import subprocess
+import datetime as dt
 import sys
-import zipfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from arm_stats import boot_ci, welch_p  # noqa: E402
+import pandas as pd
 
-import pandas as pd  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[2]
-UNIVERSE = ROOT / "user_data" / "universe"
-BT_DIR = ROOT / "user_data" / "backtest_results"
-STAKE = 1000.0
-PROXY = os.environ.get("FT_PROXY", "http://127.0.0.1:7897")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import (  # noqa: E402
+    ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, one_sided_t_p, read_result,
+    run_backtest as _run, trades_frame,
+)
 
 # 策略 → config（BigMove 需要自己的 config，别的一律 perpetual）
 CONFIGS = {"BigMoveV1": "user_data/config_bigmove.json"}
@@ -40,51 +35,19 @@ DEFAULT_ARMS = "WeekendReverseV2,CrashBuyV2,OIFlushV2,BigMoveV1,FundingSqueezeV1
 POOL_ARMS = {"top10": None, "top5": "WeekendReverseV2,CrashBuyV2", "top2": "WeekendReverseV2,CrashBuyV2"}
 
 
-def load_pairs(pool):
-    lines = (UNIVERSE / f"pairs_{pool}.txt").read_text(encoding="utf-8").splitlines()
-    return [l.split("#")[0].strip() for l in lines if l.split("#")[0].strip() and "/" in l]
-
-
-def run_backtest(strategy, pairs, timerange, tag, fee=None):
-    cfg = CONFIGS.get(strategy, DEFAULT_CFG)
-    wallet = int(STAKE * len(pairs) * 1.2)
-    cmd = [sys.executable, "-m", "freqtrade", "backtesting",
-           "--config", cfg, "--strategy", strategy,
-           "--timerange", timerange, "--pairs", *pairs,
-           "--cache", "none", "--export", "trades",
-           "--max-open-trades", str(len(pairs)),
-           "--dry-run-wallet", str(wallet), "--stake-amount", str(int(STAKE))]
-    if fee is not None:
-        cmd += ["--fee", str(fee)]
-    env = os.environ.copy()
-    if PROXY != "none":
-        env.setdefault("https_proxy", PROXY)
-        env.setdefault("http_proxy", PROXY)
-    before = set(BT_DIR.glob("backtest-result-*.zip"))
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, env=env)
-    new = sorted(set(BT_DIR.glob("backtest-result-*.zip")) - before, key=lambda p: p.stat().st_mtime)
-    if proc.returncode != 0 or not new:
-        tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-20:])
-        print(f"  !! {strategy} @ {tag} 失败（exit {proc.returncode}）\n{tail}", flush=True)
+def run_backtest(strategy, pairs, timerange, fee=None):
+    try:
+        return _run(strategy, ROOT / CONFIGS.get(strategy, DEFAULT_CFG), timerange, pairs, fee, echo=False)
+    except RuntimeError as e:
+        print(f"  !! {e}", flush=True)
         return None
-    return new[-1]
 
 
 def stats_from_zip(zip_path):
-    rows = []
-    with zipfile.ZipFile(zip_path) as z:
-        for n in z.namelist():
-            if not n.endswith(".json"):
-                continue
-            d = json.loads(z.read(n))
-            if isinstance(d, dict) and "strategy" in d:
-                rows += d["strategy"][list(d["strategy"])[0]].get("trades", [])
-    if not rows:
+    stats, trades = read_result(zip_path)
+    if not trades:
         return None
-    df = pd.DataFrame(rows)
-    df["pair_base"] = df["pair"].str.split("/").str[0]
-    df["profit$"] = df["profit_ratio"] * STAKE
-    df["close_dt"] = pd.to_datetime(df["close_date"], utc=True)
+    df = trades_frame(trades)
     p = df["profit$"]
     total = p.sum()
     gw, gl = p[p > 0].sum(), -p[p < 0].sum()
@@ -93,7 +56,7 @@ def stats_from_zip(zip_path):
     return {
         "n": len(df), "total": total, "mean": p.mean(), "win": (p > 0).mean() * 100,
         "pf": gw / gl if gl > 0 else float("inf"),
-        "p": welch_p(p), "ci": boot_ci(p),
+        "p": one_sided_t_p(p), "ci": boot_ci(p), "ci_m": cluster_boot_ci(df),
         "ex_best": total - p.max(), "best_share": p.max() / total * 100 if total else float("nan"),
         "top_pair": share.idxmax(), "top_share": share.max() / total * 100 if total else float("nan"),
         "pairs_traded": df["pair_base"].nunique(),
@@ -103,6 +66,7 @@ def stats_from_zip(zip_path):
         "avg_loss": p[p < 0].mean() if (p < 0).any() else 0,
         "monthly": mon,
         "pair_pnl": share.sort_values(ascending=False),
+        "end": stats.get("backtest_end"),
     }
 
 
@@ -146,17 +110,16 @@ def main():
     ap.add_argument("--monthly", action="store_true", help="额外打印月度与品种盈亏分布")
     args = ap.parse_args()
 
-    timerange = args.range or (f"{args.year}0101-{args.year + 1}0101" if args.year < 2026
+    this_year = dt.date.today().year
+    timerange = args.range or (f"{args.year}0101-{args.year + 1}0101" if args.year < this_year
                                else f"{args.year}0101-")
     pools = [p for p in args.pools.split(",") if p]
-    note = ""
-    if args.year >= 2026 and not args.range:
-        note = "（数据到 2026-08-29 04:00，本年只有 YTD 8 个月）"
+    note = "（本年为 YTD，实际截止见各行回测 end）" if args.year >= this_year and not args.range else ""
     print(f"区间 {timerange}{note}  口径 独立 ${STAKE:,.0f}/笔 · max_open_trades=池内品种数"
           + (f" · fee {args.fee}" if args.fee is not None else ""))
 
     for pool in pools:
-        pairs = load_pairs(pool)
+        pairs = [p for p, _ in load_pool(pool)]
         arms = ([a for a in args.arms.split(",") if a] if (args.arms and pool == pools[0])
                 else [a for a in (POOL_ARMS.get(pool) or DEFAULT_ARMS).split(",") if a])
         print("\n" + "=" * 118)
@@ -167,7 +130,7 @@ def main():
         print(hdr)
         print("-" * len(hdr))
         for arm in arms:
-            z = run_backtest(arm, pairs, timerange, pool, args.fee)
+            z = run_backtest(arm, pairs, timerange, args.fee)
             if z is None:
                 print(f"{arm:<19} —")
                 continue
@@ -182,7 +145,8 @@ def main():
                   f"{s['worst_month']:>10,.0f}")
             print(f"{'':<19} 品种盈利 {s['pairs_win']:.0f}%（{s['pairs_traded']} 个有交易）"
                   f" · 赢家均 ${s['avg_win']:,.0f} / 输家均 ${s['avg_loss']:,.0f}"
-                  f" · 最赚 1 笔占 {s['best_share']:.0f}% · 负月 {s['neg_month']:.0f}%")
+                  f" · 最赚 1 笔占 {s['best_share']:.0f}% · 负月 {s['neg_month']:.0f}%"
+                  f" · 月聚类CI [{s['ci_m'][0]:+,.0f},{s['ci_m'][1]:+,.0f}] · end {s['end']}")
             if args.monthly:
                 print(f"{'':<19} 月度：" + "  ".join(
                     f"{k[5:]} {v:+,.0f}" for k, v in s["monthly"].items()))

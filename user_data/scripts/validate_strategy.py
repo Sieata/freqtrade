@@ -32,7 +32,6 @@ import datetime as dt
 import hashlib
 import json
 import re
-import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -41,8 +40,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    BT_DIR, REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, load_pool, load_splits,
-    read_result, result_span_years,
+    REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, load_pool, load_splits,
+    read_result, result_span_years, run_backtest,
 )
 
 VAL_LEDGER = UNIVERSE / "val_ledger.jsonl"
@@ -65,47 +64,6 @@ def data_available(pair, tf):
     """本地是否已有该品种该周期的 K 线 feather。"""
     slug = pair.replace("/", "_").replace(":", "_")
     return (ROOT / "user_data" / "data" / "binance" / "futures" / f"{slug}-{tf}-futures.feather").exists()
-
-
-def newest_zip(exclude):
-    zips = [p for p in BT_DIR.glob("backtest-result-*.zip") if p not in exclude]
-    return max(zips, key=lambda p: p.stat().st_mtime) if zips else None
-
-
-def run_backtest(strategy, config, timerange, pairs, max_open_trades, fee=None):
-    import os
-
-    cmd = [
-        sys.executable, "-m", "freqtrade", "backtesting",
-        "--config", str(config),
-        "--strategy", strategy,
-        "--timerange", timerange,
-        "--pairs", *pairs,
-        "--cache", "none",
-        "--export", "trades",
-        "--max-open-trades", str(max_open_trades),
-        # 启动余额 ≥ 每笔本金 × 最大并发仓 × 1.2，否则 freqtrade 报
-        # "Starting balance smaller than stake_amount" 配置错误
-        "--dry-run-wallet", str(int(STAKE * max_open_trades * 1.2)),
-        "--stake-amount", str(int(STAKE)),
-    ]
-    if fee is not None:
-        cmd += ["--fee", str(fee)]
-    # 回测虽用本地数据，但 freqtrade 启动仍要 reload_markets（走 API），
-    # 本机直连 binance 不通，必须带代理（FT_PROXY 可覆盖，none 直连）
-    env = os.environ.copy()
-    proxy = os.environ.get("FT_PROXY", "http://127.0.0.1:7897")
-    if proxy != "none":
-        env.setdefault("https_proxy", proxy)
-        env.setdefault("http_proxy", proxy)
-    before = set(BT_DIR.glob("backtest-result-*.zip"))
-    print(f"\n$ {' '.join(cmd[:12])} ... ({len(pairs)} pairs)", flush=True)
-    proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, env=env)
-    zip_path = newest_zip(before)
-    if proc.returncode != 0 or not zip_path:
-        tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-25:])
-        raise SystemExit(f"freqtrade backtesting 失败（exit {proc.returncode}）:\n{tail}")
-    return zip_path
 
 
 def analyze(stats, trades, max_open_trades=1):
@@ -292,7 +250,10 @@ def main():
         for split_name, tr in (("TEST", splits["test_timerange"]), ("VAL", splits["val_timerange"])):
             if (split_name == "TEST" and args.skip_test) or (split_name == "VAL" and args.skip_val):
                 continue
-            zp = run_backtest(args.strategy, args.config, tr, have, len(have), args.fee)
+            try:
+                zp = run_backtest(args.strategy, args.config, tr, have, args.fee)
+            except RuntimeError as e:
+                raise SystemExit(str(e))
             runs.append((pool, split_name, tr, have, skipped, zp))
     if not runs:
         raise SystemExit("没有任何可运行的组合（检查 --pool/--skip-* 与本地数据）")

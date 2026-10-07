@@ -18,60 +18,17 @@
   ./.venv/Scripts/python.exe user_data/scripts/arm_stats.py --pool top10 --arms WeekendReverseV2,CrashBuyV2
 """
 import argparse
-import random
 import sys
 from pathlib import Path
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from research_lib import STAKE, load_arm, pool_bases  # noqa: E402
+from research_lib import (  # noqa: E402
+    STAKE, boot_ci, cluster_boot_ci, load_arm, one_sided_t_p, pool_bases,
+)
 
 DEFAULT_ARMS = ["WeekendReverseV2", "CrashBuyV2", "OIFlushV2", "BigMoveV1", "FundingSqueezeV1L"]
-
-
-def one_sided_t_p(d):
-    """单边 t 检验 p 值（H0: 均值 ≤ 0），用 t 分布的近似。"""
-    n = len(d)
-    if n < 3:
-        return float("nan")
-    sd = d.std(ddof=1)
-    if sd == 0:
-        return 0.0 if d.mean() > 0 else 1.0
-    t = d.mean() / (sd / n ** 0.5)
-    try:
-        from scipy import stats
-        return float(stats.t.sf(t, df=n - 1))
-    except Exception:
-        import math
-        # 正态近似（n 大时足够）
-        return float(0.5 * math.erfc(t / 2 ** 0.5))
-
-
-def boot_ci(d, iters=4000, seed=7):
-    """均值的自举 95% 置信区间。"""
-    random.seed(seed)
-    vals = list(d)
-    n = len(vals)
-    if n < 3:
-        return (float("nan"), float("nan"))
-    means = sorted(sum(random.choices(vals, k=n)) / n for _ in range(iters))
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
-
-
-def cluster_boot_ci(g, iters=4000, seed=7):
-    """按平仓月聚类自举每笔均值的 95% CI：同月交易整块重抽，保留月内相关性。"""
-    random.seed(seed)
-    blocks = [(b["profit$"].sum(), len(b)) for _, b in g.groupby(g["close_dt"].dt.strftime("%Y-%m"))]
-    k = len(blocks)
-    if k < 3:
-        return (float("nan"), float("nan"))
-    means = []
-    for _ in range(iters):
-        pick = random.choices(blocks, k=k)
-        means.append(sum(s for s, _ in pick) / max(sum(n for _, n in pick), 1))
-    means.sort()
-    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
 
 
 def summarize(df, dim="seg"):

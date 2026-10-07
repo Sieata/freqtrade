@@ -14,25 +14,18 @@
   4. --worst N: 最差 N 笔（检查止损缺口穿透）
 """
 import argparse
-import json
 import sys
-import zipfile
 from collections import defaultdict
+from pathlib import Path
 
-STAKE = 1000.0
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import STAKE, read_result  # noqa: E402
 
 
 def load(zip_path):
-    with zipfile.ZipFile(zip_path) as z:
-        names = [n for n in z.namelist() if n.endswith(".json") and "meta" not in n.lower() or n.endswith(".json")]
-        # freqtrade 结果 zip 内为一个主 json（meta json 在 .last_result.json 之外单独存在时跳过）
-        for n in names:
-            d = json.loads(z.read(n))
-            if isinstance(d, dict) and "strategy" in d:
-                strat = d["strategy"]
-                name = list(strat.keys())[0]
-                return name, strat[name].get("trades", []), d
-    raise SystemExit(f"no strategy results found in {zip_path}")
+    stats, trades = read_result(zip_path)
+    return stats.get("strategy_name", "?"), trades, stats
 
 
 def main():

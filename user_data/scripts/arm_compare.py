@@ -12,11 +12,14 @@
   7) 各臂最差 5 笔（尾部风险形态）。
 """
 import argparse
-import json
 import sys
-import zipfile
+from pathlib import Path
 
 import pandas as pd
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import read_result  # noqa: E402
 
 
 def _naive(x):
@@ -24,32 +27,25 @@ def _naive(x):
     return t.tz_localize(None) if t.tzinfo is None else t.tz_convert(None)
 
 
-def load_arm(path):
-    """从回测 zip 读第一个含 strategy dict 的 json，返回 (策略名, trades DataFrame)。"""
-    with zipfile.ZipFile(path) as z:
-        for n in z.namelist():
-            if not n.endswith(".json"):
-                continue
-            try:
-                d = json.loads(z.read(n))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                continue
-            if not (isinstance(d, dict) and isinstance(d.get("strategy"), dict) and d["strategy"]):
-                continue
-            name, s = next(iter(d["strategy"].items()))
-            rows = [{
-                "pair": t["pair"],
-                "open": _naive(t["open_date"]),
-                "close": _naive(t["close_date"]),
-                "profit": float(t["profit_abs"]),
-                "ratio": float(t.get("profit_ratio", 0.0) or 0.0),
-                "exit": t.get("exit_reason", "?"),
-            } for t in s.get("trades", [])]
-            df = pd.DataFrame(rows)
-            if len(df):
-                df = df.sort_values("open").reset_index(drop=True)
-            return name, df
-    raise SystemExit(f"{path}: 未找到 strategy/trades")
+def load_arm(path, stake):
+    """读回测 zip（首个策略）→ (策略名, trades DataFrame)。
+
+    profit = profit_ratio × stake（独立口径）。2026-10-07 前用 profit_abs：喂复利 zip 时
+    逐年/尾部 $ 与 pp 都是复利路径数字，与文档声称的"独立口径"不符。
+    """
+    s, trades = read_result(path)
+    rows = [{
+        "pair": t["pair"],
+        "open": _naive(t["open_date"]),
+        "close": _naive(t["close_date"]),
+        "profit": float(t.get("profit_ratio", 0.0) or 0.0) * stake,
+        "ratio": float(t.get("profit_ratio", 0.0) or 0.0),
+        "exit": t.get("exit_reason", "?"),
+    } for t in trades]
+    df = pd.DataFrame(rows)
+    if len(df):
+        df = df.sort_values("open").reset_index(drop=True)
+    return s.get("strategy_name", "?"), df
 
 
 def overview(df, label):
@@ -168,8 +164,8 @@ def main():
     ap.add_argument("--names", default=None, help="臂标签，逗号分隔，默认用策略名截短")
     ap.add_argument("--stake", type=float, default=1000.0)
     a = ap.parse_args()
-    na, dfa = load_arm(a.zipA)
-    nb, dfb = load_arm(a.zipB)
+    na, dfa = load_arm(a.zipA, a.stake)
+    nb, dfb = load_arm(a.zipB, a.stake)
     if a.names:
         la, lb = [x.strip() for x in a.names.split(",")]
     else:

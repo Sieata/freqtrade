@@ -15,15 +15,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import zipfile
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import ROOT, STAKE, read_result  # noqa: E402
+
 CAND_DIR = ROOT / "user_data" / "data" / "binance" / "futures"
 
 _cache: dict[str, pd.DataFrame] = {}
@@ -37,15 +38,15 @@ def candles(pair: str) -> pd.DataFrame | None:
 
 
 def load_trades(zip_path: str) -> tuple[str, list[dict]]:
-    with zipfile.ZipFile(zip_path) as z:
-        for n in z.namelist():
-            if not n.endswith(".json") or "config" in n:
-                continue
-            d = json.loads(z.read(n))
-            if isinstance(d, dict) and "strategy" in d:
-                name = list(d["strategy"])[0]
-                return name, d["strategy"][name]["trades"]
-    raise SystemExit(f"{zip_path}: 未找到策略结果")
+    """读 zip → (策略名, trades)。每笔加 pnl = profit_ratio × $1,000（独立口径）。
+
+    2026-10-07 前 $ 统计用 profit_abs：喂复利 zip 时后期大仓位主导"止损占毛亏比"等占比，
+    结论随复利路径漂移。比率类统计（profit_ratio/max_rate）不受影响。
+    """
+    stats, trades = read_result(zip_path)
+    for t in trades:
+        t["pnl"] = t["profit_ratio"] * STAKE
+    return stats["strategy_name"] if "strategy_name" in stats else "?", trades
 
 
 def main() -> None:
@@ -56,7 +57,7 @@ def main() -> None:
 
     name, tr = load_trades(args.result)
     n = len(tr)
-    total = sum(t["profit_abs"] for t in tr)
+    total = sum(t["pnl"] for t in tr)
     print("=" * 92)
     print(f"# {name} | {os.path.basename(args.result)} | n={n} | 总利润 ${total:,.0f}")
     print("=" * 92)
@@ -66,7 +67,7 @@ def main() -> None:
     for t in tr:
         b = by[t["exit_reason"]]
         b[0] += 1
-        b[1] += t["profit_abs"]
+        b[1] += t["pnl"]
         b[2] += t["profit_ratio"]
         b[3] += t["trade_duration"]
     print(f"\n[1] 出场原因\n{'reason':22s} {'n':>5s} {'占比':>7s} {'总利润$':>10s} {'利润占比':>8s} {'均值%':>7s} {'时长h':>7s}")
@@ -75,17 +76,17 @@ def main() -> None:
               f"{v[2]/v[0]*100:6.2f}% {v[3]/v[0]/60:7.1f}")
 
     # ── 2. 亏损构成 ────────────────────────────────────
-    losers = [t for t in tr if t["profit_abs"] < 0]
+    losers = [t for t in tr if t["pnl"] < 0]
     stops = [t for t in tr if t["exit_reason"] == "stop_loss"]
-    gross_loss = sum(t["profit_abs"] for t in losers)
+    gross_loss = sum(t["pnl"] for t in losers)
     print(f"\n[2] 亏损构成：亏损单 {len(losers)} 笔（{len(losers)/n*100:.1f}%），合计 ${gross_loss:,.0f}")
     if losers:
         print(f"    其中 stop_loss {len(stops)} 笔，占亏损总额 "
-              f"{sum(t['profit_abs'] for t in stops)/gross_loss*100:.1f}%，"
+              f"{sum(t['pnl'] for t in stops)/gross_loss*100:.1f}%，"
               f"均值 {sum(t['profit_ratio'] for t in stops)/max(len(stops),1)*100:.2f}%")
 
     # ── 3. 赢家的浮亏深度（收紧止损的代价） ────────────
-    win = [t for t in tr if t["profit_abs"] > 0]
+    win = [t for t in tr if t["pnl"] > 0]
     if win:
         dds = sorted(t["min_rate"] / t["open_rate"] - 1 for t in win)
         print(f"\n[3] 赢家 {len(win)} 笔的持有期最大浮亏（min_rate 毛口径）：收紧止损会砍掉多少赢家")
@@ -136,7 +137,7 @@ def main() -> None:
 
     # ── 6. 赔率结构与保本胜率 ──────────────────────────
     nw, nl = len(win), len(losers)
-    gw, gl = sum(t["profit_abs"] for t in win), -gross_loss
+    gw, gl = sum(t["pnl"] for t in win), -gross_loss
     if nw and nl and gw > 0 and gl > 0:
         pf = gw / gl
         W, L = gw / nw, gl / nl

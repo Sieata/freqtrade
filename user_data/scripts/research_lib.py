@@ -70,10 +70,13 @@ def pool_wallet(name):
 
 # ---------------------------------------------------------------- 回测结果
 def read_result(zip_path):
-    """读回测 zip → (stats dict, trades list)。"""
+    """读回测 zip → (stats dict, trades list)。
+
+    路径解析：绝对路径 / 相对当前目录存在的路径原样用；否则按裸文件名在 BT_DIR 下找。
+    """
     zip_path = Path(zip_path)
-    if not zip_path.is_absolute():
-        zip_path = BT_DIR / zip_path
+    if not zip_path.is_absolute() and not zip_path.exists():
+        zip_path = BT_DIR / zip_path.name
     with zipfile.ZipFile(zip_path) as z:
         for n in z.namelist():
             if not n.endswith(".json"):
@@ -106,6 +109,110 @@ def trades_frame(trades, seg=None):
     if seg:
         df["seg"] = seg
     return df
+
+
+# ---------------------------------------------------------------- 跑回测
+def run_backtest(strategy, config, timerange, pairs, fee=None, max_open_trades=None, echo=True):
+    """独立口径回测（每笔固定 $1,000，--cache none），返回 BT_DIR 下的结果 zip 路径。
+
+    失败抛 RuntimeError（附 freqtrade 输出尾部）。每次运行导出到独立临时目录再移回 BT_DIR，
+    并行跑多个回测不会互相"认领"对方的最新 zip（旧实现按 mtime 取最新，会串）。
+    回测虽用本地数据，freqtrade 启动仍要 reload_markets（走 API），默认带代理（FT_PROXY 覆盖，none 直连）。
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import uuid
+
+    mot = max_open_trades or len(pairs)
+    tmp = BT_DIR / f".run_{uuid.uuid4().hex[:8]}"
+    tmp.mkdir(parents=True)
+    cmd = [sys.executable, "-m", "freqtrade", "backtesting",
+           "--config", str(config), "--strategy", strategy,
+           "--timerange", timerange, "--pairs", *pairs,
+           "--cache", "none", "--export", "trades", "--export-directory", str(tmp),
+           "--max-open-trades", str(mot),
+           # 启动余额 ≥ 每笔本金 × 最大并发仓 × 1.2，否则 "Starting balance smaller than stake_amount"
+           "--dry-run-wallet", str(int(STAKE * mot * 1.2)),
+           "--stake-amount", str(int(STAKE))]
+    if fee is not None:
+        cmd += ["--fee", str(fee)]
+    env = os.environ.copy()
+    proxy = os.environ.get("FT_PROXY", "http://127.0.0.1:7897")
+    if proxy != "none":
+        env.setdefault("https_proxy", proxy)
+        env.setdefault("http_proxy", proxy)
+    if echo:
+        print(f"\n$ freqtrade backtesting --strategy {strategy} --timerange {timerange} "
+              f"({len(pairs)} pairs{f', fee {fee}' if fee is not None else ''})", flush=True)
+    try:
+        proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, env=env,
+                              encoding="utf-8", errors="replace")
+        zips = sorted(tmp.glob("backtest-result-*.zip"))
+        if proc.returncode != 0 or not zips:
+            tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-25:])
+            raise RuntimeError(f"freqtrade backtesting 失败（{strategy} {timerange}，exit {proc.returncode}）:\n{tail}")
+        src = zips[-1]
+        dst = BT_DIR / src.name
+        if dst.exists():  # 同秒并发完成：加后缀避免覆盖
+            dst = BT_DIR / f"{src.stem}_{tmp.name[5:]}{src.suffix}"
+        shutil.move(str(src), dst)
+        meta = src.with_suffix(".meta.json")
+        if meta.exists():
+            shutil.move(str(meta), dst.with_suffix(".meta.json"))
+        return dst
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- 逐笔统计
+def one_sided_t_p(d):
+    """单边 t 检验 p 值（H0: 每笔均值 ≤ 0）。假设交易独立——同事件多品种交易相关时偏乐观。"""
+    n = len(d)
+    if n < 3:
+        return float("nan")
+    sd = d.std(ddof=1)
+    if sd == 0:
+        return 0.0 if d.mean() > 0 else 1.0
+    t = d.mean() / (sd / n ** 0.5)
+    try:
+        from scipy import stats
+        return float(stats.t.sf(t, df=n - 1))
+    except Exception:
+        import math
+        return float(0.5 * math.erfc(t / 2 ** 0.5))  # 正态近似（n 大时足够）
+
+
+def boot_ci(d, iters=4000, seed=7):
+    """每笔均值的自举 95% CI（逐笔独立重抽）。"""
+    import random
+    rnd = random.Random(seed)
+    vals = list(d)
+    n = len(vals)
+    if n < 3:
+        return (float("nan"), float("nan"))
+    means = sorted(sum(rnd.choices(vals, k=n)) / n for _ in range(iters))
+    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
+
+
+def cluster_boot_ci(df, iters=4000, seed=7):
+    """按平仓月聚类自举每笔均值的 95% CI：同月交易整块重抽，保留月内相关性。
+
+    df 需含 profit$ / close_dt。与 boot_ci 差距大 = 有效样本远少于笔数。
+    """
+    import random
+    rnd = random.Random(seed)
+    blocks = [(b["profit$"].sum(), len(b)) for _, b in df.groupby(df["close_dt"].dt.strftime("%Y-%m"))]
+    k = len(blocks)
+    if k < 3:
+        return (float("nan"), float("nan"))
+    means = []
+    for _ in range(iters):
+        pick = rnd.choices(blocks, k=k)
+        means.append(sum(s for s, _ in pick) / max(sum(n for _, n in pick), 1))
+    means.sort()
+    return (means[int(0.025 * iters)], means[int(0.975 * iters)])
 
 
 # ---------------------------------------------------------------- 月度序列
