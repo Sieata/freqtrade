@@ -9,16 +9,14 @@
   .venv/bin/python user_data/scripts/time_splits.py --shell    # 可 eval 的 shell 变量
 """
 import argparse
-import json
 import sys
 from pathlib import Path
 
-SPLITS_FILE = Path(__file__).resolve().parent.parent / "universe" / "splits.json"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import UNIVERSE, load_splits  # noqa: E402
 
-def load_splits():
-    with open(SPLITS_FILE, encoding="utf-8") as f:
-        return json.load(f)
+SPLITS_FILE = UNIVERSE / "splits.json"
 
 
 def main():

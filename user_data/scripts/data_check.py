@@ -17,6 +17,10 @@ from collections import Counter
 
 import pandas as pd
 
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from research_lib import load_pool as _load_pool  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 UNIVERSE = os.path.join(ROOT, "user_data", "universe")
 DATA = os.path.join(ROOT, "user_data", "data", "binance", "futures")
@@ -24,16 +28,11 @@ STEP = {"4h": 4, "1d": 24, "1h": 1, "8h": 8, "15m": 0.25, "5m": 5 / 60}
 
 
 def load_pool(name):
-    path = os.path.join(UNIVERSE, f"pairs_{name}.txt")
-    if not os.path.exists(path):
-        print(f"[!] 池文件不存在: {path}")
+    try:
+        return [p for p, _ in _load_pool(name)]
+    except FileNotFoundError:
+        print(f"[!] 池文件不存在: {os.path.join(UNIVERSE, f'pairs_{name}.txt')}")
         return []
-    out = []
-    for line in open(path, encoding="utf-8"):
-        line = line.split("#")[0].strip()
-        if line:
-            out.append(line)
-    return out
 
 
 def collect_pairs(args):

@@ -39,6 +39,7 @@
   ./.venv/Scripts/python.exe user_data/scripts/idea_screen.py --fam all --detail 2
 """
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -53,10 +54,14 @@ except Exception:  # pragma: no cover
     def pval(t):
         return np.nan
 
-FD = Path("user_data/data/binance/futures")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import USER_DATA, load_splits, split_ts  # noqa: E402
+
+FD = USER_DATA / "data" / "binance" / "futures"
 FEE = 0.0005
 FEE_STRESS = 0.0010
-TEST = (pd.Timestamp("2022-01-01", tz="UTC"), pd.Timestamp("2024-08-28", tz="UTC"))
+# TEST 窗口取自 splits.json（切分唯一权威来源；重切时不会漏改）
+TEST = (pd.Timestamp(load_splits()["test_start"], tz="UTC"), split_ts())
 # TOP10 池（HYPE 2025-05 上市 -> TEST 段无数据，本轮不参与；XMR 2024 中退市 -> 自动按数据截断）
 SYMS = ["BTC", "ETH", "BNB", "XRP", "SOL", "TRX", "ZEC", "DOGE", "XMR"]
 pd.set_option("display.width", 250)

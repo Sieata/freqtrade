@@ -98,6 +98,13 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   组合脚本统一段长并把 VAL 截到各臂共同最早截止；⑤ portfolio_4arm 硬编码段长 2.657/2.002 年。
   `portfolio_full.py` 已删（被 portfolio_4arm 替代）。
   月度统计一律用 `research_lib.monthly_series`（全日历，空月记 0），否则低频臂的 Sharpe/相关是噪声。
+  已迁移（2026-10-07）：validate / tier_b_eval / arm_stats / portfolio_4arm / signal_recon / year_slice /
+  exit_anatomy / arm_compare / pool_review / sizing_sweep / data_check / time_splits / idea_screen /
+  signal_stack_check。回测一律走 `research_lib.run_backtest`（独立临时目录导出，并行安全）；
+  $ 统计一律 `profit_ratio × $1,000`，不用 `profit_abs`（复利 zip 下是路径数字）。
+  未迁移 = 结论已固化的一次性研究脚本（weekend_* / carry_* / *_phase1 / *_batch / synth_put_* 等），
+  复用前先迁移。改 research_lib 后必跑：`.venv/Scripts/python.exe -m pytest user_data/scripts/tests -q -p no:cacheprovider`。
+  **跨脚本 import 的函数改名前先 grep 调用方**（arm_stats.welch_p 改名曾让 year_slice 直接 import 失败）。
   组合结论看 portfolio_4arm 的「配比样本外检验」（权重只在 TEST 估，RESEARCH 26.3）。
 - **VAL 窥视台账 `user_data/universe/val_ledger.jsonl`（入库）**：validate 每次跑 VAL 记一行
   (策略, SHA16, 池)；同名策略换了 SHA 再跑 VAL → 报告出 `VAL 窥视` WARN，该结果不得当独立样本外

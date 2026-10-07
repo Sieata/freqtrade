@@ -57,8 +57,7 @@ def main():
     for v in VENUES:
         results[v] = venue_hist(v)
 
-    print("
-30 天 realized funding APR（按各自结算间隔年化）:")
+    print("\n30 天 realized funding APR（按各自结算间隔年化）:")
     print(f"{'symbol':<20}" + "".join(f"{v:>14}" for v in results))
     for sym in syms:
         line = f"{sym:<20}"
@@ -71,8 +70,7 @@ def main():
             else:
                 line += f"{'—':>14}"
         print(line)
-    print("
-未决风险：跨所价格基差未量化（各所合约规格/预言机不同，快照价差 100% 为口径错位），")
+    print("\n未决风险：跨所价格基差未量化（各所合约规格/预言机不同，快照价差 100% 为口径错位），")
     print("需逐所归一合约规格后才能评估双腿的保证金/基差风险。")
 
 

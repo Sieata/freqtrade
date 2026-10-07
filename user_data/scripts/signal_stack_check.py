@@ -11,11 +11,19 @@
 import numpy as np
 import pandas as pd
 
-FUT = "user_data/data/binance/futures"
-METRICS = "user_data/data/binance/futures_metrics"
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import USER_DATA, load_splits  # noqa: E402
+
+FUT = str(USER_DATA / "data" / "binance" / "futures")
+METRICS = str(USER_DATA / "data" / "binance" / "futures_metrics")
 PAIRS = ["BTC", "ETH", "BNB", "XRP", "SOL", "ZEC", "DOGE", "ADA", "AVAX", "DOT", "TRX", "XMR"]
 FEE_RT = 0.001
-T_START, T_END = "2022-01-01", "2024-08-28"
+_S = load_splits()  # TEST 窗口取自 splits.json
+T_START = f"{_S['test_start'][:4]}-{_S['test_start'][4:6]}-{_S['test_start'][6:]}"
+T_END = f"{_S['split_date'][:4]}-{_S['split_date'][4:6]}-{_S['split_date'][6:]}"
 WIN = 1080
 
 

@@ -47,6 +47,8 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from research_lib import load_pool  # noqa: E402
 PY = sys.executable
 DEFAULT_CFG = REPO / "user_data" / "config_perpetual.json"
 
@@ -73,15 +75,10 @@ METRICS = {
 
 
 def pairs_from_pool(pool: str) -> list[str]:
-    path = REPO / "user_data" / "universe" / f"pairs_{pool}.txt"
-    if not path.exists():
-        raise SystemExit(f"币池文件不存在: {path}")
-    out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        code = line.split("#")[0].strip()
-        if code:
-            out.append(code)
-    return out
+    try:
+        return [p for p, _ in load_pool(pool)]
+    except FileNotFoundError:
+        raise SystemExit(f"币池文件不存在: pairs_{pool}.txt")
 
 
 def num(value: str) -> float:
