@@ -1516,3 +1516,21 @@ trailing 26 笔 +$2,155 / roi 1 笔 +$250。
 - 事件臂定位从"组合增量"改为"**额外资金的增量收益**"：只在 V2 资金已满配、
   有闲置额度时才加；不应以"降低组合风险"为由上线。
 - paper 证据（FS/BigMove 自 2026-08-29 起）是判断这三臂的主要依据，回测已无更多信息。
+
+### 26.5 门禁 v2 批准后的正式判定（2026-10-07）
+
+用户批准 GATE_TIERING_PROPOSAL v1 + v2，条款写入 STRATEGY_WORKFLOW 4.3。
+`tier_b_eval.py` 改为逐条判定全部门禁（此前门禁1–3 从未被工具检查过）：
+
+| 臂 | 结果 | 未过项 |
+|---|---|---|
+| **OIFlushV2** | ✅ 全过 | — |
+| FundingSqueezeV1L | ❌ | 门禁3 VAL（ZEC 占 79%，其 92% 在 2025）；门禁6 TEST 1.52×（线 1.5×） |
+| BigMoveV1 | ❌ | 门禁3 TEST（DOGE 69%）与 VAL（ZEC 69%） |
+
+配比纪律（portfolio_4arm）：四臂 1:1 / 逆波动 / 最大Sharpe 全部 ❌（ΔSR CI 下界 −1.45 / −1.61 / −1.02）；
+**V2 + OIFlushV2 全部 ✅**：1:1 VAL Calmar 5.03 vs 仅 V2 4.07，ΔSR −0.12 [−0.56, +0.23]。
+
+处置：Tier B 合格组合 = **V2 + OIFlushV2**（OI 配比 0.5–1.0 均可，按 TEST 估的最大Sharpe 配比 0.49）。
+FS / BigMove 维持 paper 观察，不进实盘组合；其复活条件 = 集中度门禁在新数据上通过
+（paper 期间 ZEC 之外的品种贡献须实质上升）。

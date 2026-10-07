@@ -1,9 +1,12 @@
-"""Tier B 事件臂评估表（门禁分层提案 GATE_TIERING_PROPOSAL.md 的实测工具）。
+"""Tier B 事件臂门禁（STRATEGY_WORKFLOW 4.3，2026-10-07 批准生效）的判定工具。
 
-对指定事件臂策略计算提案中的增量门禁（--pool 口径，独立 $1,000/笔）：
+对指定事件臂逐条判定（--pool 口径，独立 $1,000/笔，TEST 与 VAL 都要过）：
+  门禁1 利润>0 且 PF>1.0
+  门禁2 VAL 回撤 max_relative_drawdown ≤ 30%
+  门禁3 集中度：最大品种利润占比 ≤ 50%，且该品种利润单年集中 ≤ 80%
   门禁4 信号重叠: 臂与 V2 同品种同 4h 入场的占比 ≤ 30%
-  门禁5 组合增量: 加臂后组合年化(钱包) − V2 单独年化 ≥ +3pp（TEST/VAL 分别判）
-  门禁5b 风险调整增量（2026-10-07 提案 v2）: 月度 Sharpe 满足 SR_臂 > ρ × SR_V2
+  门禁5（描述性，不判）组合增量: 加臂后组合年化(钱包) − V2 单独年化
+  门禁5b 风险调整增量: 月度 Sharpe 满足 SR_臂 > ρ × SR_V2
          （ρ = 臂与 V2 月度 P&L 相关）。这是"加入该臂能提高组合最大 Sharpe"的充要条件，
          与配比无关。门禁5 用 V2 钱包当分母，等于新臂资金免费——任何赚钱的臂都能过，
          V2 自我复制实测 +19pp 通过；5b 下复制品 SR_臂 = 1.0 × SR_V2，不严格大于 → 不过。
@@ -32,13 +35,25 @@ from research_lib import (  # noqa: E402
 
 BASE = "WeekendReverseV2"
 ARMS = ["FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
-G4_MAX, G5_MIN, G6_MAX, G7_NEG_MAX, G7_DEPTH = 30.0, 3.0, 1.5, 1, -15.0
+G2_MAX_DD, G3_TOP, G3_YEAR, G4_MAX, G6_MAX, G7_NEG_MAX, G7_DEPTH = 0.30, 0.50, 0.80, 30.0, 1.5, 1, -15.0
 
 
 def leg_window(strategy, pool, seg):
     """该策略验证腿的实际回测窗口 (start, end)。"""
     stats, _ = read_result(find_validation(strategy, pool)[seg]["zip"])
     return pd.Timestamp(stats["backtest_start"], tz="UTC"), pd.Timestamp(stats["backtest_end"], tz="UTC")
+
+
+def concentration(df):
+    """(最大品种, 其利润占比, 其最好一年占该品种利润比)；总利润 ≤ 0 时返回 None。"""
+    tot = df["profit$"].sum()
+    if tot <= 0 or df.empty:
+        return None
+    by_pair = df.groupby("pair_base")["profit$"].sum()
+    top = by_pair.idxmax()
+    t = df[df["pair_base"] == top]
+    yr = t.groupby(t["close_dt"].dt.year)["profit$"].sum()
+    return top, by_pair[top] / tot, (yr.max() / by_pair[top]) if by_pair[top] > 0 else 0.0
 
 
 def summarize(df, years, wallet):
@@ -53,7 +68,9 @@ def summarize(df, years, wallet):
 
 def eval_arm(arm, base_df, pool, windows, wallet):
     arm_df, report = load_arm(arm, pool)
-    out = {"arm": arm, "report": report}
+    out = {"arm": arm, "report": report,
+           "val_dd": float(read_result(find_validation(arm, pool)["VAL"]["zip"])[0]
+                           .get("max_relative_drawdown") or 0.0)}
     for seg in ("TEST", "VAL"):
         lo, hi = windows[seg]
         years = (hi - lo).total_seconds() / 86400 / 365.25
@@ -78,6 +95,10 @@ def eval_arm(arm, base_df, pool, windows, wallet):
             "yearly": s_a["yearly"], "years": years,
             "rho": rho, "sr_a": sr_a, "sr_v": sr_v, "sr_c": sr_c,
             "g5b": sr_a - rho * sr_v,
+            "profit": a["profit$"].sum(),
+            "pf": (a.loc[a["profit$"] > 0, "profit$"].sum() / -a.loc[a["profit$"] < 0, "profit$"].sum()
+                   if (a["profit$"] < 0).any() else float("inf")),
+            "conc": concentration(a),
         }
     return out
 
@@ -112,24 +133,32 @@ def main():
             x = r[seg]
             print(f"  {seg}: {x['n']}笔  臂年化 {x['ann_arm'] * 100:+.1f}%  V2年化 {x['ann_v2'] * 100:+.1f}%  "
                   f"组合年化 {x['ann_comb'] * 100:+.1f}%（{x['years']:.2f} 年）")
+        gates = []  # (段, 名称, 通过?, 说明)
         for seg in ("TEST", "VAL"):
             x = r[seg]
-            g4 = "✅" if x["g4"] <= G4_MAX else "❌"
-            g5 = "✅" if x["g5"] >= G5_MIN else "❌"
-            g6 = "✅" if x["g6"] <= G6_MAX else "❌"
-            print(f"  [{seg}] 门禁4 重叠 {x['g4']:.0f}%{g4}  门禁5 组合增量 {x['g5']:+.1f}pp{g5}  "
-                  f"门禁6 最差月归一 {x['g6']:.2f}x{g6} (合并 {x['g6_worst_comb']:+,.0f}$ vs V2 {x['g6_worst_v2']:+,.0f}$)")
-        for seg in ("TEST", "VAL"):
-            x = r[seg]
-            g5b = "✅" if x["g5b"] > 1e-6 else "❌"
-            print(f"  [{seg}] 门禁5b SR臂 {x['sr_a']:.2f} vs ρ×SR_V2 = {x['rho']:+.2f}×{x['sr_v']:.2f}"
-                  f" → 余量 {x['g5b']:+.2f}{g5b}  （1:1 组合 Sharpe {x['sr_c']:.2f} vs V2 {x['sr_v']:.2f}）")
+            gates.append((seg, "1 利润/PF", x["profit"] > 0 and x["pf"] > 1.0,
+                          f"${x['profit']:+,.0f} PF {x['pf']:.2f}"))
+            c = x["conc"]
+            gates.append((seg, "3 集中度", c is not None and c[1] <= G3_TOP and c[2] <= G3_YEAR,
+                          f"{c[0]} 占 {c[1]:.0%}，其最好一年占 {c[2]:.0%}" if c else "无利润"))
+            gates.append((seg, "4 重叠", x["g4"] <= G4_MAX, f"{x['g4']:.0f}%"))
+            gates.append((seg, "5b 风险调整增量", x["g5b"] > 1e-6,
+                          f"SR臂 {x['sr_a']:.2f} vs ρ×SR_V2 = {x['rho']:+.2f}×{x['sr_v']:.2f}，余量 {x['g5b']:+.2f}"
+                          f"（1:1 组合 SR {x['sr_c']:.2f}）"))
+            gates.append((seg, "6 最差月归一", x["g6"] <= G6_MAX,
+                          f"{x['g6']:.2f}x（合并 {x['g6_worst_comb']:+,.0f}$ vs V2 {x['g6_worst_v2']:+,.0f}$）"))
+        gates.append(("VAL", "2 回撤", r["val_dd"] <= G2_MAX_DD, f"{r['val_dd']:.1%}"))
         yv = r["VAL"]["yearly"]
         neg = yv[yv < 0]
         depth = neg.min() / STAKE * 100 if len(neg) else 0.0
-        g7 = "✅" if len(neg) <= G7_NEG_MAX and depth >= G7_DEPTH else "❌"
-        ys = " ".join(f"{y}:{v / STAKE * 100:+.1f}%" for y, v in yv.items())
-        print(f"  [VAL] 门禁7 负年 {len(neg)} 个{g7}  逐年: {ys}")
+        gates.append(("VAL", "7 负年", len(neg) <= G7_NEG_MAX and depth >= G7_DEPTH,
+                      f"{len(neg)} 个，最深 {depth:+.1f}%  逐年 "
+                      + " ".join(f"{y}:{v / STAKE * 100:+.1f}%" for y, v in yv.items())))
+        for seg, name, ok, detail in sorted(gates, key=lambda g: (g[1], g[0])):
+            print(f"  {'✅' if ok else '❌'} [{seg:<4}] 门禁{name}: {detail}")
+        print(f"  ·  [描述] 门禁5 组合增量（已降级不判）: TEST {r['TEST']['g5']:+.1f}pp / VAL {r['VAL']['g5']:+.1f}pp")
+        fails = [f"{n}({s})" for s, n, ok, _ in gates if not ok]
+        print(f"  → {arm}: " + ("✅ Tier B 全部门禁通过" if not fails else "❌ 未通过: " + ", ".join(fails)))
 
 
 if __name__ == "__main__":

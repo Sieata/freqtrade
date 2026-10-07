@@ -3,6 +3,7 @@
 每年重置本金 = 臂数 × $1,000；输出：单臂/组合逐年收益率、月度统计、相关矩阵、
 逐臂边际贡献（leave-one-out）、并发峰值，以及**配比样本外检验**。
 用法: .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py [--pool top10]
+      .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py --arms OIFlushV2   # V2 + 指定臂
 
 2026-10-07：改用 research_lib（pool 必填，空池报错）；年化分母原硬编码 2.657/2.002 年，
 VAL 右端开放后会随数据增长失真 → 改为各段公共窗口实长（VAL 截到四臂最早截止）。
@@ -39,6 +40,7 @@ from tier_b_eval import leg_window  # noqa: E402
 
 ARMS = ["WeekendReverseV2", "FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
 SHORT = {"WeekendReverseV2": "V2", "FundingSqueezeV1L": "FS", "OIFlushV2": "OI", "BigMoveV1": "BM"}
+CI_FLOOR = -1.0  # 配比纪律：VAL ΔSharpe 90%CI 下界（STRATEGY_WORKFLOW 4.3）
 
 
 def peak_conc(df):
@@ -52,7 +54,7 @@ def peak_conc(df):
 
 
 def seg_parts(arm_dfs, seg, hi):
-    return {SHORT[a]: d[(d["seg"] == seg) & (d["close_dt"] <= hi)] for a, d in arm_dfs.items()}
+    return {SHORT.get(a, a): d[(d["seg"] == seg) & (d["close_dt"] <= hi)] for a, d in arm_dfs.items()}
 
 
 def report(parts, seg, window):
@@ -97,9 +99,9 @@ def fit_weights(monthly):
 
 def weight_oos(m_test, m_val, y_test, y_val):
     print(f"\n{'=' * 96}\n【配比样本外检验】权重只在 TEST 估计 → VAL 检验（权重 = 每笔本金倍数，V2=1）\n{'=' * 96}")
-    print(f"{'方案':<10}{'V2':>6}{'FS':>6}{'OI':>6}{'BM':>6}   "
+    cols = list(m_test.columns)
+    print(f"{'方案':<10}" + "".join(f"{k:>6}" for k in cols) + "   "
           f"{'TEST Sharpe':>11}{'Calmar':>8}   {'VAL Sharpe':>10}{'Calmar':>8}{'年均$/单位本金':>16}")
-    ref = None
     for name, w in fit_weights(m_test).items():
         row = []
         for m, y in ((m_test, y_test), (m_val, y_val)):
@@ -107,12 +109,11 @@ def weight_oos(m_test, m_val, y_test, y_val):
             dd = max_dd(c)
             row.append((sharpe_m(c), (c.sum() / y) / abs(dd) if dd < 0 else float("inf"),
                         c.sum() / y / w.sum()))
-        ref = ref or row[1][0]
-        print(f"{name:<10}" + "".join(f"{w[k]:>6.2f}" for k in ["V2", "FS", "OI", "BM"])
+        print(f"{name:<10}" + "".join(f"{w[k]:>6.2f}" for k in cols)
               + f"   {row[0][0]:>11.2f}{row[0][1]:>8.2f}   {row[1][0]:>10.2f}{row[1][1]:>8.2f}{row[1][2]:>+16,.0f}")
-    v2 = pd.Series({"V2": 1.0, "FS": 0, "OI": 0, "BM": 0})
+    v2 = pd.Series({k: 1.0 if k == "V2" else 0.0 for k in cols})
     c_t, c_v = m_test.mul(v2, axis=1).sum(axis=1), m_val.mul(v2, axis=1).sum(axis=1)
-    print(f"{'仅V2':<10}" + "".join(f"{v2[k]:>6.2f}" for k in ["V2", "FS", "OI", "BM"])
+    print(f"{'仅V2':<10}" + "".join(f"{v2[k]:>6.2f}" for k in cols)
           + f"   {sharpe_m(c_t):>11.2f}{(c_t.sum() / y_test) / abs(max_dd(c_t)):>8.2f}"
           f"   {sharpe_m(c_v):>10.2f}{(c_v.sum() / y_val) / abs(max_dd(c_v)):>8.2f}"
           f"{c_v.sum() / y_val:>+16,.0f}")
@@ -123,11 +124,17 @@ def weight_oos(m_test, m_val, y_test, y_val):
     base_v = c_v.values[idx]
     sr = lambda x: x.mean(axis=1) / x.std(axis=1, ddof=1) * 12 ** 0.5  # noqa: E731
     print(f"VAL Sharpe 差 vs 仅V2（月度配对自举 2000 次，{n} 个月）:")
+    calmar = lambda c: (c.sum() / y_val) / abs(max_dd(c)) if max_dd(c) < 0 else float("inf")  # noqa: E731
+    cal_v2 = calmar(c_v)
     for name, w in fit_weights(m_test).items():
-        d = sr(m_val.mul(w, axis=1).sum(axis=1).values[idx]) - sr(base_v)
+        c = m_val.mul(w, axis=1).sum(axis=1)
+        d = sr(c.values[idx]) - sr(base_v)
         lo, hi = np.nanpercentile(d, [5, 95])
+        # 配比纪律（STRATEGY_WORKFLOW 4.3）：VAL Calmar ≥ 仅V2 且 ΔSharpe 90%CI 下界 > CI_FLOOR
+        ok = calmar(c) >= cal_v2 and lo > CI_FLOOR
         print(f"  {name:<10} 点估计 {np.nanmedian(d):+.2f}  90%CI [{lo:+.2f}, {hi:+.2f}]"
-              f"  P(优于仅V2) {np.nanmean(d > 0) * 100:.0f}%")
+              f"  P(优于仅V2) {np.nanmean(d > 0) * 100:.0f}%   配比纪律 {'✅' if ok else '❌'}"
+              f"（Calmar {calmar(c):.2f} vs {cal_v2:.2f}，CI 下界 {lo:+.2f} vs {CI_FLOOR:+.1f}）")
     print("解读：Calmar = 年均$ ÷ |月度最大回撤$|。VAL 列是唯一的样本外证据；"
           "TEST 列里最大Sharpe 必然最好（在 TEST 上拟合的），不说明问题。")
 
@@ -136,16 +143,18 @@ def main():
     ap = argparse.ArgumentParser(description="四臂组合回测（sleeve 模型）")
     ap.add_argument("--pool", default="top10",
                     choices=["top2", "top5", "top10", "core", "volume"])
+    ap.add_argument("--arms", default="", help="逗号分隔事件臂（V2 恒为基准），默认 FS,OI,BM 全部")
     args = ap.parse_args()
+    arms = ["WeekendReverseV2"] + ([a for a in args.arms.split(",") if a] or ARMS[1:])
     print(f"池 = {args.pool}  钱包口径 = ${pool_wallet(args.pool):,.0f}")
     arm_dfs = {}
-    for arm in ARMS:
+    for arm in arms:
         df, rep = load_arm(arm, args.pool)
-        print(f"  {SHORT[arm]:<3} {len(df):>4} 笔  <- {rep}")
+        print(f"  {SHORT.get(arm, arm):<3} {len(df):>4} 笔  <- {rep}")
         arm_dfs[arm] = df
     split = split_ts()
-    val_hi = min(leg_window(a, args.pool, "VAL")[1] for a in ARMS)
-    test_w = (leg_window(ARMS[0], args.pool, "TEST")[0], split)
+    val_hi = min(leg_window(a, args.pool, "VAL")[1] for a in arms)
+    test_w = (leg_window(arms[0], args.pool, "TEST")[0], split)
     m_test, y_test = report(seg_parts(arm_dfs, "TEST", split), "TEST", test_w)
     m_val, y_val = report(seg_parts(arm_dfs, "VAL", val_hi), "VAL", (split, val_hi))
     weight_oos(m_test, m_val, y_test, y_val)
