@@ -4,8 +4,9 @@
 逐臂边际贡献（leave-one-out）、并发峰值。
 用法: .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py [--pool top10]
 
-坑（2026-09-21 修）：必须显式设定 tier_b_eval.POOL/--pool，否则 load_arm 的
-POOL 为空集 → 所有交易被过滤、四臂全 0 笔且不报错。
+2026-10-07：改用 research_lib（pool 必填，空池报错）；年化分母原硬编码 2.657/2.002 年，
+VAL 右端开放后会随数据增长失真 → 改为各段公共窗口实长（VAL 截到四臂最早截止）。
+已替代并删除 portfolio_full.py（无 --pool、按"最新报告"取数，同样有静默混池）。
 """
 import argparse
 import sys
@@ -14,8 +15,8 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import tier_b_eval  # noqa: E402
-from tier_b_eval import load_arm, load_pool, SPLIT, STAKE  # noqa: E402
+from research_lib import STAKE, load_arm, pool_wallet, split_ts  # noqa: E402
+from tier_b_eval import leg_window  # noqa: E402
 
 ARMS = ["WeekendReverseV2", "FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
 SHORT = {"WeekendReverseV2": "V2", "FundingSqueezeV1L": "FS", "OIFlushV2": "OI", "BigMoveV1": "BM"}
@@ -47,16 +48,17 @@ def stats(df, base, label):
     }
 
 
-def report(arm_dfs, seg, seg_test):
-    sel = (lambda d: d[d["close_dt"] < SPLIT]) if seg_test else (lambda d: d[d["close_dt"] >= SPLIT])
-    years_span = 2.657 if seg_test else 2.002
-    parts = {SHORT[a]: sel(d).copy() for a, d in arm_dfs.items()}
+def report(arm_dfs, seg, window):
+    lo, hi = window
+    years_span = (hi - lo).total_seconds() / 86400 / 365.25
+    parts = {SHORT[a]: d[(d["seg"] == seg) & (d["close_dt"] <= hi)].copy() for a, d in arm_dfs.items()}
     for p in parts.values():
         p["profit$"] = p["profit_ratio"] * STAKE
     all_df = pd.concat(parts.values())
     base = len(parts) * STAKE
 
-    print(f"\n{'=' * 96}\n【{seg}】基数 = {len(parts)} 臂 × ${STAKE:,} = ${base:,}/年\n{'=' * 96}")
+    print(f"\n{'=' * 96}\n【{seg} {lo:%Y-%m-%d}→{hi:%Y-%m-%d}，{years_span:.2f} 年】"
+          f"基数 = {len(parts)} 臂 × ${STAKE:,.0f} = ${base:,.0f}/年\n{'=' * 96}")
     rows = []
     for name, d in parts.items():
         s = stats(d, STAKE, name)
@@ -86,16 +88,16 @@ def main():
     ap.add_argument("--pool", default="top10",
                     choices=["top2", "top5", "top10", "core", "volume"])
     args = ap.parse_args()
-    pool, wallet = load_pool(args.pool)
-    tier_b_eval.POOL, tier_b_eval.WALLET = pool, wallet
-    print(f"池 = {args.pool}（{len(pool)} 品种）  钱包口径 = ${wallet:,}")
+    print(f"池 = {args.pool}  钱包口径 = ${pool_wallet(args.pool):,.0f}")
     arm_dfs = {}
     for arm in ARMS:
         df, rep = load_arm(arm, args.pool)
         print(f"  {SHORT[arm]:<3} {len(df):>4} 笔  <- {rep}")
         arm_dfs[arm] = df
-    report(arm_dfs, "TEST 20220101-20240828", True)
-    report(arm_dfs, "VAL 20240828-", False)
+    split = split_ts()
+    val_hi = min(leg_window(a, args.pool, "VAL")[1] for a in ARMS)
+    report(arm_dfs, "TEST", (leg_window(ARMS[0], args.pool, "TEST")[0], split))
+    report(arm_dfs, "VAL", (split, val_hi))
 
 
 if __name__ == "__main__":

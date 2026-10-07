@@ -16,6 +16,10 @@
   TEST: 总利润>0 且 PF>1.0 且 ≥80% 品种盈利（独立口径）
   VAL : 同上 且 max_relative_drawdown ≤ 30%；笔数<20 只警告
   警告: 利润集中度（top 品种占比>50% 或其利润 80% 集中在单年）→ 防新币单年 pump
+  警告: VAL 窥视台账（universe/val_ledger.jsonl）——同名策略的另一 SHA 已跑过 VAL = 二次窥视
+
+产物: reports/validate_<策略>_<时间>.md（人读）+ 同名 .json 旁车（机读，下游脚本经
+research_lib.find_validation 读取，不再正则解析 markdown）。VAL 右端开放，实际截止时间写入两者。
 
 用法:
   .venv/bin/python user_data/scripts/validate_strategy.py --strategy WeekendReverseV2
@@ -30,54 +34,30 @@ import json
 import re
 import subprocess
 import sys
-import zipfile
 from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-UNIVERSE = ROOT / "user_data" / "universe"
-STRATEGIES = ROOT / "user_data" / "strategies"
-BT_DIR = ROOT / "user_data" / "backtest_results"
-REPORT_DIR = ROOT / "user_data" / "reports"
-STAKE = 1000.0
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import (  # noqa: E402
+    BT_DIR, REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, load_pool, load_splits,
+    read_result, result_span_years,
+)
+
+VAL_LEDGER = UNIVERSE / "val_ledger.jsonl"
 
 GATES_TEST = {"min_pair_win_rate": 0.80}
 GATES_VAL = {"min_pair_win_rate": 0.80, "max_dd": 0.30}
 
 
-def load_splits():
-    with open(UNIVERSE / "splits.json") as f:
-        return json.load(f)
-
-
-def load_pool(name):
-    """读币池文件 → [(pair, 注释dict)]，'#' 起注释，行内 'k=v' 解析进 dict。"""
-    path = UNIVERSE / f"pairs_{name}.txt"
-    out = []
-    for line in path.read_text().splitlines():
-        line = line.split("#", 1)
-        pair = line[0].strip()
-        if not pair:
-            continue
-        meta = {}
-        if len(line) > 1:
-            for tok in line[1].split():
-                if "=" in tok:
-                    k, v = tok.split("=", 1)
-                    meta[k] = v
-        out.append((pair, meta))
-    return out
-
-
 def strategy_timeframe(strategy, config_path):
     """策略类里的 timeframe 优先，回退 config。"""
-    src = (STRATEGIES / f"{strategy}.py").read_text()
+    src = (STRATEGIES / f"{strategy}.py").read_text(encoding="utf-8")
     m = re.search(r"timeframe\s*=\s*['\"]([^'\"]+)['\"]", src)
     if m:
         return m.group(1)
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         return json.load(f).get("timeframe", "4h")
 
 
@@ -128,19 +108,6 @@ def run_backtest(strategy, config, timerange, pairs, max_open_trades, fee=None):
     return zip_path
 
 
-def parse_result(zip_path):
-    with zipfile.ZipFile(zip_path) as z:
-        for n in z.namelist():
-            if not n.endswith(".json"):
-                continue
-            d = json.loads(z.read(n))
-            if isinstance(d, dict) and "strategy" in d:
-                name = list(d["strategy"])[0]
-                s = d["strategy"][name]
-                return s, s.get("trades", [])
-    raise SystemExit(f"{zip_path}: 无策略结果")
-
-
 def analyze(stats, trades, max_open_trades=1):
     """独立口径分析：每笔固定 $1,000。返回 (portfolio dict, 按品种表, 集中度 dict)。"""
     cell = defaultdict(float)
@@ -173,23 +140,26 @@ def analyze(stats, trades, max_open_trades=1):
             "best_year_share": (best_v / top_v) if top_v > 0 else 0.0,
         }
 
-    dd = stats.get("max_drawdown_account", stats.get("max_drawdown_abs", 0) or 0)
+    # 门禁口径 = 钱包口径 max_relative_drawdown（AGENTS/bt_summary 约定）。2026-10-07 前误用
+    # max_drawdown_account（同一回测 20.2% vs 32.1%），VAL 回撤门禁系统性偏松。
+    dd = float(stats.get("max_relative_drawdown") or 0.0)
+    dd_acct = float(stats.get("max_drawdown_account") or 0.0)
     pf = stats.get("profit_factor")
     portfolio = {
         "trades": stats.get("total_trades", len(trades)),
         "profit_abs": stats.get("profit_total_abs", 0.0),
         "win_rate": stats.get("winrate", 0.0),
         "pf": pf if pf else (float("inf") if stats.get("profit_total_abs", 0) > 0 else 0.0),
-        "dd": dd if isinstance(dd, float) else 0.0,
+        "dd": dd,
+        "dd_acct": dd_acct,
         "pairs_profitable": len(prof_pairs),
         "pairs_total": len(pairs),
     }
 
     # 年化（2026-08-29 展示约定）：固定 $1,000/笔不复利；钱包 = max_open_trades×1.2×$1,000
+    # 分母 = 回测覆盖时长（2026-10-07 前用首末笔交易跨度，低频臂年化会虚高）
     if trades:
-        o = pd.Timestamp(min(t["open_date"] for t in trades))
-        c = pd.Timestamp(max(t["close_date"] for t in trades))
-        span_years = max((c - o).total_seconds() / 86400 / 365.25, 1e-9)
+        span_years = result_span_years(stats)
         wallet = max_open_trades * 1.2 * STAKE
         holds = sum(
             (pd.Timestamp(t["close_date"]) - pd.Timestamp(t["open_date"])).total_seconds()
@@ -203,6 +173,34 @@ def analyze(stats, trades, max_open_trades=1):
             "ann_deployed": (portfolio["profit_abs"] / span_years) / max(avg_conc * STAKE, 1e-9),
         })
     return portfolio, (pairs, years, cell, cnt, wins), conc
+
+
+def _ledger_rows():
+    if not VAL_LEDGER.exists():
+        return []
+    return [json.loads(x) for x in VAL_LEDGER.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+def val_ledger_check(strategy, sha):
+    """VAL 窥视检查：同名策略的其他 SHA 已跑过 VAL → 本次 VAL 结果是"看过答案后改的"。
+
+    只警告不阻断（换池复核是合法用途），但结论里必须如实标注。台账入库，跨设备生效；
+    只认策略名——改名另起副本绕不过纪律本身，RESEARCH 里仍须记录来源版本。
+    """
+    prev = [r for r in _ledger_rows() if r["strategy"] == strategy]
+    other = sorted({r["sha16"] for r in prev if r["sha16"] != sha})
+    if other:
+        first = min(r["date"] for r in prev)
+        return (f"该策略已有 {len(other)} 个其他版本跑过 VAL（首次 {first}，SHA {', '.join(other)}）"
+                f"→ 本次 VAL 属二次窥视，不能当独立样本外证据")
+    return None
+
+
+def val_ledger_append(strategy, sha, pools, zips):
+    row = {"date": dt.date.today().isoformat(), "strategy": strategy, "sha16": sha,
+           "pools": pools, "zips": zips}
+    with open(VAL_LEDGER, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def gate_check(split, portfolio, conc):
@@ -219,7 +217,8 @@ def gate_check(split, portfolio, conc):
     res.append((f"≥{g['min_pair_win_rate']:.0%} 品种盈利", "PASS" if ok else "FAIL", f"{n}/{tot}"))
     if split == "VAL":
         res.append(("回撤≤30%", "PASS" if portfolio["dd"] <= g["max_dd"] else "FAIL",
-                    f"{portfolio['dd'] * 100:.1f}%（钱包口径 max_relative_drawdown）"))
+                    f"{portfolio['dd'] * 100:.1f}%（钱包口径 max_relative_drawdown；"
+                    f"账户口径 {portfolio['dd_acct'] * 100:.1f}% 仅参考）"))
         if portfolio["trades"] < 20:
             res.append(("笔数≥20", "WARN", f"{portfolio['trades']} 笔（低频策略属正常，解读谨慎）"))
     if conc.get("top_pair") and conc["grand"] > 0:
@@ -303,12 +302,26 @@ def main():
         f"- 口径: 独立口径 ${STAKE:.0f}/笔，max_open_trades=池内品种数，--cache none",
         "",
     ]
+    sidecar = {"strategy": args.strategy, "sha16": sha, "config": str(args.config), "timeframe": tf,
+               "fee": args.fee, "splits_version": splits["version"],
+               "created": dt.datetime.now().isoformat(timespec="seconds"), "runs": []}
     for pool, split_name, tr, have, skipped, zp in runs:
-        stats, trades = parse_result(zp)
+        stats, trades = read_result(zp)
         portfolio, table, conc = analyze(stats, trades, len(have))
         gates = gate_check(split_name, portfolio, conc)
+        if split_name == "VAL":
+            peek = val_ledger_check(args.strategy, sha)
+            if peek:
+                gates.append(("VAL 窥视", "WARN", peek))
         if any(r[1] == "FAIL" for r in gates):
             all_pass = False
+        sidecar["runs"].append({
+            "pool": pool, "split": split_name, "timerange": tr, "zip": zp.name,
+            "backtest_start": stats.get("backtest_start"), "backtest_end": stats.get("backtest_end"),
+            "pairs": have, "skipped": skipped,
+            "metrics": {k: v for k, v in portfolio.items() if isinstance(v, (int, float))},
+            "gates": [{"name": n, "verdict": v, "detail": d} for n, v, d in gates],
+        })
         ann = (f"年化: 钱包口径 {portfolio['ann_wallet'] * 100:+.1f}%/年 · "
                f"占仓口径 {portfolio['ann_deployed'] * 100:+.1f}%/年"
                f"（平均并发 {portfolio['avg_conc']:.1f} 仓，{portfolio['years']:.2f} 年）"
@@ -317,13 +330,14 @@ def main():
         yearly_pct = " ".join(
             f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / STAKE * 100:+.1f}%"
             for y in years_list)
-        print(f"\n=== {pool.upper()} × {split_name} ({tr}) ===")
+        print(f"\n=== {pool.upper()} × {split_name} ({tr}，实际 {stats.get('backtest_start')} → "
+              f"{stats.get('backtest_end')}) ===")
         print(f"trades={portfolio['trades']}  profit=${portfolio['profit_abs']:,.0f}  "
               f"win%={portfolio['win_rate'] * 100:.1f}  PF={portfolio['pf']:.2f}  "
               f"dd={portfolio['dd'] * 100:.1f}%  盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}")
         print(ann)
         print(f"逐年收益率（每年重置 $1,000 本金，当年利润÷1000）: {yearly_pct}")
-        print(f"独立口径品种×年度（$1,000/笔）:")
+        print("独立口径品种×年度（$1,000/笔）:")
         print(fmt_table(*table))
         for name, verdict, detail in gates:
             mark = {"PASS": "✅", "FAIL": "❌", "WARN": "⚠️ "}[verdict]
@@ -331,6 +345,8 @@ def main():
             if verdict == "FAIL":
                 all_pass = False
         report += [f"## {pool.upper()} × {split_name}（{tr}）",
+                   f"实际区间: {stats.get('backtest_start')} → {stats.get('backtest_end')}",
+                   "",
                    f"结果: `{zp.name}`" + (f"（{len(skipped)} 个品种缺 {tf} 数据未计入，"
                                            f"补数据: ./ensure-data.sh user_data/universe/pairs_{pool}.txt）"
                                            if skipped else ""),
@@ -353,8 +369,15 @@ def main():
     if not args.no_report and runs:
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         out = REPORT_DIR / f"validate_{args.strategy}_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-        out.write_text("\n".join(report))
-        print(f"报告: {out}")
+        out.write_text("\n".join(report), encoding="utf-8")
+        sidecar["verdict"] = "PASS" if all_pass else "FAIL"
+        out.with_suffix(".json").write_text(json.dumps(sidecar, ensure_ascii=False, indent=1),
+                                            encoding="utf-8")
+        print(f"报告: {out}（+ .json 旁车）")
+    # 摩擦测试（--fee）不记台账：同版本换费率不构成窥视
+    val_runs = [r for r in runs if r[1] == "VAL"]
+    if val_runs and args.fee is None:
+        val_ledger_append(args.strategy, sha, [r[0] for r in val_runs], [r[5].name for r in val_runs])
     sys.exit(0 if all_pass else 1)
 
 

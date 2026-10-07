@@ -6,6 +6,8 @@
 ## 环境
 
 - Python 一律用 `.venv/bin/python`（uv 管理，Python 3.12；系统 python3 是 3.9 且无依赖，别用）。
+  **Windows 设备是 `.venv/Scripts/python.exe`**；默认编码 cp936，脚本里所有文本读写必须显式
+  `encoding="utf-8"`（池文件中文注释 / 报告 ✅ 在 GBK 下直接崩，2026-10-07 已全量补齐）。
 - 验证环境：`.venv/bin/python -c "import talib, talib.abstract, pandas, ccxt, freqtrade; import freqtrade.optimize.backtesting"`
 - 本仓库已入 git：K 线/funding/mark 数据在 `user_data/data/binance/futures/`，clone 后离线可回测，**不要重复下载全量数据**。
 
@@ -47,7 +49,7 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 .venv/bin/python user_data/scripts/validate_strategy.py --strategy X # 一键 TEST+VAL × core+volume + 门禁 + 报告
 #   --pool top5 / top10 / core / volume / both（top5=纯蓝筹 BTC/ETH/BNB/XRP/SOL，剥离中盘贡献用）
 .venv/bin/python user_data/scripts/arm_stats.py --pool top5          # 单臂统计质量表（逐笔 t 检验+自举 CI+集中度）
-.venv/bin/python user_data/scripts/tier_b_eval.py --pool top5        # Tier B 增量门禁（--arms 可加 CrashBuyV2 等）
+.venv/bin/python user_data/scripts/tier_b_eval.py --pool top10       # Tier B 增量门禁（--arms 可加 CrashBuyV2 等；基准 V2 与各臂须有同池验证报告）
 .venv/bin/python user_data/scripts/portfolio_4arm.py --pool top10    # 四臂组合（V2+FS+OI+BM）sleeve 模型：逐年/相关矩阵/LOO
 .venv/bin/python user_data/scripts/funding_spread_scan.py --deep 56  # 跨所费差扫描（币安×Hyperliquid + 14天持续性深查）
 .venv/bin/python user_data/scripts/cross_arb_research.py --mode both --pool top10   # 跨品种套利（费率分散 + 协整价差）
@@ -86,6 +88,18 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - **模块级全局的哑失败（2026-09-21）**：`tier_b_eval.POOL` 是模块级变量，只在其 `main()` 里
   按 `--pool` 赋值。外部脚本 import `load_arm` 而不设 `POOL` → 空集过滤掉全部交易，
   输出 0 笔且**不报错**。`portfolio_4arm.py` 已修（加 `--pool`），同类脚本照此自查。
+- **公共层 `research_lib.py`（2026-10-07 框架审计）**：池读取 / 切分 / 读 zip / 按池定位验证报告
+  一律从这里 import，禁止再各自复制。`find_validation(strategy, pool)` 的 pool 必填、空池报错；
+  validate 现在同时写 `.json` 旁车，下游优先读旁车（旧报告回退解析 markdown）。
+  审计修掉的哑失败：① validate 的 VAL 回撤门禁误用 `max_drawdown_account`（偏松，同一回测
+  20% vs 32%）→ 改 `max_relative_drawdown`，**此前 VAL 回撤 PASS 的结论需按新口径复核**；
+  ② tier_b_eval 的 pool 修复只改了函数签名、调用处从未传 pool，混池一直在；③ tier_b_eval
+  门禁5 在 TEST 段恒判 ✅；④ 年化分母原为首末笔交易跨度（低频臂虚高）→ 改回测覆盖时长，
+  组合脚本统一段长并把 VAL 截到各臂共同最早截止；⑤ portfolio_4arm 硬编码段长 2.657/2.002 年。
+  `portfolio_full.py` 已删（被 portfolio_4arm 替代）。
+- **VAL 窥视台账 `user_data/universe/val_ledger.jsonl`（入库）**：validate 每次跑 VAL 记一行
+  (策略, SHA16, 池)；同名策略换了 SHA 再跑 VAL → 报告出 `VAL 窥视` WARN，该结果不得当独立样本外
+  证据。摩擦测试（--fee）不记。台账从 2026-10-07 起算，此前的 VAL 使用史只在 RESEARCH.md。
 - **TOP5 蓝筹参照池（2026-09-21）**：`--pool top5`（BTC/ETH/BNB/XRP/SOL）= TOP10 的纯蓝筹子集，
   用于剥离中盘贡献（TOP10 的利润有相当比例来自 ZEC/DOGE/XMR/TRX）。只作**描述性复核**：
   5 品种下"≥80% 品种盈利"= 最多 1 个品种能亏，容错极窄，结论别当独立验证用。
