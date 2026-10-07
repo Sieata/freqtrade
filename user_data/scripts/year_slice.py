@@ -11,7 +11,7 @@ max_open_trades = 池内品种数、--cache none）重跑并出表。
 
 用法:
   ./.venv/Scripts/python.exe user_data/scripts/year_slice.py --year 2026 --pool top10
-  ... --pools top10,top5,top2 --arms WeekendReverseV2,CrashBuyV2
+  ... --pools top10,top5,top2 --arms WeekendReverseV2,OIFlushV2
   ... --year 2025 --range 20250101-20260101     # 自定区间覆盖整年
 """
 import argparse
@@ -31,8 +31,8 @@ from research_lib import (  # noqa: E402
 # 策略 → config（BigMove 需要自己的 config，别的一律 perpetual）
 CONFIGS = {"BigMoveV1": "user_data/config_bigmove.json"}
 DEFAULT_CFG = "user_data/config_perpetual.json"
-DEFAULT_ARMS = "WeekendReverseV2,CrashBuyV2,OIFlushV2,BigMoveV1,FundingSqueezeV1L"
-POOL_ARMS = {"top10": None, "top5": "WeekendReverseV2,CrashBuyV2", "top2": "WeekendReverseV2,CrashBuyV2"}
+DEFAULT_ARMS = "WeekendReverseV2,OIFlushV2,BigMoveV1,FundingSqueezeV1L"
+POOL_ARMS = {"top10": None, "top5": "WeekendReverseV2,OIFlushV2", "top2": "WeekendReverseV2,OIFlushV2"}
 
 
 def run_backtest(strategy, pairs, timerange, fee=None):

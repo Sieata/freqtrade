@@ -15,7 +15,7 @@
 
 用法:
   ./.venv/Scripts/python.exe user_data/scripts/arm_stats.py --pool top5
-  ./.venv/Scripts/python.exe user_data/scripts/arm_stats.py --pool top10 --arms WeekendReverseV2,CrashBuyV2
+  ./.venv/Scripts/python.exe user_data/scripts/arm_stats.py --pool top10 --arms WeekendReverseV2,OIFlushV2
 """
 import argparse
 import sys
@@ -28,7 +28,7 @@ from research_lib import (  # noqa: E402
     STAKE, boot_ci, cluster_boot_ci, load_arm, one_sided_t_p, pool_bases,
 )
 
-DEFAULT_ARMS = ["WeekendReverseV2", "CrashBuyV2", "OIFlushV2", "BigMoveV1", "FundingSqueezeV1L"]
+DEFAULT_ARMS = ["WeekendReverseV2", "OIFlushV2", "BigMoveV1", "FundingSqueezeV1L"]
 
 
 def summarize(df, dim="seg"):
