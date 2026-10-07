@@ -1,4 +1,4 @@
-# Freqtrade 环境激活脚本
+﻿# Freqtrade 环境激活脚本
 # 使用方法: powershell -ExecutionPolicy Bypass -File activate.ps1
 # 或者在 PowerShell 中: . .\activate.ps1
 
@@ -18,8 +18,8 @@ Write-Host "  freqtrade webserver                  - 启动Web管理界面"
 Write-Host ""
 
 # 自动检查数据，缺失则静默下载
-$DataDir = "$PSScriptRoot\user_data\data"
-$hasData = Get-ChildItem -Path $DataDir -File -ErrorAction SilentlyContinue
+# 以 BTC 4h K 线文件为准（原按 user_data\data 顶层有无文件判断，README.md 存在即误判为"有数据"）
+$hasData = Test-Path "$PSScriptRoot\user_data\data\binance\futures\BTC_USDT_USDT-4h-futures.feather"
 if (-not $hasData) {
     Write-Host "K线数据缺失，自动下载中..." -ForegroundColor Yellow
     & "$PSScriptRoot\ensure-data.ps1"
