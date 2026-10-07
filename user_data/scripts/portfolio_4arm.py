@@ -1,33 +1,49 @@
 """四臂组合回测（V2 引擎 + FS/OIFlush/BigMove 事件臂，sleeve 模型）。
 
 每年重置本金 = 臂数 × $1,000；输出：单臂/组合逐年收益率、月度统计、相关矩阵、
-逐臂边际贡献（leave-one-out）、并发峰值。
+逐臂边际贡献（leave-one-out）、并发峰值，以及**配比样本外检验**。
 用法: .venv/Scripts/python.exe user_data/scripts/portfolio_4arm.py [--pool top10]
 
 2026-10-07：改用 research_lib（pool 必填，空池报错）；年化分母原硬编码 2.657/2.002 年，
 VAL 右端开放后会随数据增长失真 → 改为各段公共窗口实长（VAL 截到四臂最早截止）。
 已替代并删除 portfolio_full.py（无 --pool、按"最新报告"取数，同样有静默混池）。
+同日：月度统计改全日历（无交易月补 0）——旧版相关矩阵只在双方都有交易的月上算，
+低频臂相关系数是噪声（BM–OI TEST 0.68 / VAL 0.03）。
+
+配比检验（只在 TEST 上估权重，VAL 只检验一次，避免拿 VAL 调配比）：
+  1:1      现行 sleeve（每臂每笔 $1,000）
+  逆波动   权重 ∝ 1/月度σ（不依赖收益估计，最稳健的基线）
+  最大Sharpe  权重 ∝ Σ⁻¹μ，负权截 0（依赖收益估计，样本少时易过拟合）
+权重是每臂每笔本金的倍数，归一化到 V2 = 1。Sharpe/Calmar 与规模无关，可直接比较。
 """
 import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from research_lib import STAKE, load_arm, pool_wallet, split_ts  # noqa: E402
+from research_lib import (  # noqa: E402
+    STAKE,
+    load_arm,
+    max_dd,
+    monthly_series,
+    pool_wallet,
+    sharpe_m,
+    split_ts,
+)
 from tier_b_eval import leg_window  # noqa: E402
+
 
 ARMS = ["WeekendReverseV2", "FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
 SHORT = {"WeekendReverseV2": "V2", "FundingSqueezeV1L": "FS", "OIFlushV2": "OI", "BigMoveV1": "BM"}
 
 
 def peak_conc(df):
-    ev = []
-    for _, t in df.iterrows():
-        ev.append((t["open_dt"], 1))
-        ev.append((t["close_dt"], -1))
-    ev.sort(key=lambda e: (e[0], e[1]))
+    ev = sorted([(t, 1) for t in df["open_dt"]] + [(t, -1) for t in df["close_dt"]],
+                key=lambda e: (e[0], e[1]))
     cur = peak = 0
     for _, d in ev:
         cur += d
@@ -35,52 +51,85 @@ def peak_conc(df):
     return peak
 
 
-def stats(df, base, label):
-    m = df.groupby(df["close_dt"].dt.strftime("%Y-%m"))["profit$"].sum()
-    yr = df.groupby(df["close_dt"].dt.year)["profit$"].sum()
-    eq = m.cumsum()
-    return {
-        "label": label, "n": len(df), "total": df["profit$"].sum(),
-        "m_mean": m.mean(), "m_min": m.min(), "neg": (m < 0).mean() * 100,
-        "mdd": (eq - eq.cummax()).min(), "peak": peak_conc(df),
-        "yearly": yr, "ypct": " ".join(f"{y}:{v / base * 100:+.0f}%" for y, v in yr.items()),
-        "monthly": m,
-    }
+def seg_parts(arm_dfs, seg, hi):
+    return {SHORT[a]: d[(d["seg"] == seg) & (d["close_dt"] <= hi)] for a, d in arm_dfs.items()}
 
 
-def report(arm_dfs, seg, window):
+def report(parts, seg, window):
     lo, hi = window
-    years_span = (hi - lo).total_seconds() / 86400 / 365.25
-    parts = {SHORT[a]: d[(d["seg"] == seg) & (d["close_dt"] <= hi)].copy() for a, d in arm_dfs.items()}
-    for p in parts.values():
-        p["profit$"] = p["profit_ratio"] * STAKE
+    years = (hi - lo).total_seconds() / 86400 / 365.25
     all_df = pd.concat(parts.values())
     base = len(parts) * STAKE
+    monthly = pd.DataFrame({k: monthly_series(d, lo, hi) for k, d in parts.items()})
+    comb = monthly.sum(axis=1)
 
-    print(f"\n{'=' * 96}\n【{seg} {lo:%Y-%m-%d}→{hi:%Y-%m-%d}，{years_span:.2f} 年】"
+    print(f"\n{'=' * 96}\n【{seg} {lo:%Y-%m-%d}→{hi:%Y-%m-%d}，{years:.2f} 年，{len(monthly)} 个月】"
           f"基数 = {len(parts)} 臂 × ${STAKE:,.0f} = ${base:,.0f}/年\n{'=' * 96}")
-    rows = []
     for name, d in parts.items():
-        s = stats(d, STAKE, name)
-        rows.append(s)
-        print(f"{name:<4} {s['n']:>5}笔  年均 {s['total'] / years_span:>+8,.0f}$  "
-              f"逐年 {s['ypct']}  并发峰 {s['peak']}")
-    s_all = stats(all_df, base, "组合")
-    print(f"组合 {s_all['n']:>5}笔  年均 {s_all['total'] / years_span:>+8,.0f}$  "
-          f"逐年 {s_all['ypct']}  最差月 {s_all['m_min']:>+,.0f}$  负月 {s_all['neg']:.0f}%  "
-          f"月度回撤 {s_all['mdd']:>+,.0f}$  并发峰 {s_all['peak']}")
-    # 相关矩阵
-    cal = pd.DataFrame({k: v["monthly"] for k, v in
-                        [(n, s) for n, s in ((name, stats(d, STAKE, name)) for name, d in parts.items())]})
-    print("月度相关矩阵:")
-    print(cal.corr().round(2).to_string())
-    # leave-one-out 边际
-    print("leave-one-out（去掉该臂后组合年利润变化，负数=该臂贡献为正）:")
+        yr = d.groupby(d["close_dt"].dt.year)["profit$"].sum()
+        ys = " ".join(f"{y}:{v / STAKE * 100:+.0f}%" for y, v in yr.items())
+        print(f"{name:<4} {len(d):>5}笔  年均 {d['profit$'].sum() / years:>+8,.0f}$  "
+              f"Sharpe {sharpe_m(monthly[name]):>5.2f}  逐年 {ys}  并发峰 {peak_conc(d)}")
+    yr = all_df.groupby(all_df["close_dt"].dt.year)["profit$"].sum()
+    ys = " ".join(f"{y}:{v / base * 100:+.0f}%" for y, v in yr.items())
+    print(f"组合 {len(all_df):>5}笔  年均 {comb.sum() / years:>+8,.0f}$  Sharpe {sharpe_m(comb):>5.2f}  "
+          f"逐年 {ys}  最差月 {comb.min():>+,.0f}$  负月 {(comb < 0).mean() * 100:.0f}%  "
+          f"月度回撤 {max_dd(comb):>+,.0f}$  并发峰 {peak_conc(all_df)}")
+    print("月度相关矩阵（全日历，空月记 0）:")
+    print(monthly.corr().round(2).to_string())
+    print("leave-one-out（去掉该臂：年均$ 变化 / 组合 Sharpe 变化）:")
     for name in parts:
-        rest = pd.concat([d for n, d in parts.items() if n != name])
-        s_rest = stats(rest, base - STAKE, name)
-        print(f"  去{name:<4}: 组合年均 {s_rest['total'] / years_span:>+8,.0f}$ "
-              f"(Δ {s_rest['total'] / years_span - s_all['total'] / years_span:>+6,.0f}$)")
+        rest = comb - monthly[name]
+        print(f"  去{name:<4}: 年均 {rest.sum() / years:>+8,.0f}$ (Δ {-monthly[name].sum() / years:>+6,.0f}$)  "
+              f"Sharpe {sharpe_m(rest):.2f} (Δ {sharpe_m(rest) - sharpe_m(comb):+.2f})")
+    return monthly, years
+
+
+def fit_weights(monthly):
+    """在给定月度矩阵上估三套权重（归一化到 V2 = 1）。"""
+    sd = monthly.std(ddof=1)
+    out = {"1:1": pd.Series(1.0, index=monthly.columns), "逆波动": 1 / sd}
+    mu, cov = monthly.mean().values, monthly.cov().values
+    w = np.clip(np.linalg.solve(cov + 1e-9 * np.eye(len(mu)), mu), 0, None)
+    out["最大Sharpe"] = pd.Series(w, index=monthly.columns)
+    return {k: v / v["V2"] if v["V2"] > 0 else v / v.max() for k, v in out.items()}
+
+
+def weight_oos(m_test, m_val, y_test, y_val):
+    print(f"\n{'=' * 96}\n【配比样本外检验】权重只在 TEST 估计 → VAL 检验（权重 = 每笔本金倍数，V2=1）\n{'=' * 96}")
+    print(f"{'方案':<10}{'V2':>6}{'FS':>6}{'OI':>6}{'BM':>6}   "
+          f"{'TEST Sharpe':>11}{'Calmar':>8}   {'VAL Sharpe':>10}{'Calmar':>8}{'年均$/单位本金':>16}")
+    ref = None
+    for name, w in fit_weights(m_test).items():
+        row = []
+        for m, y in ((m_test, y_test), (m_val, y_val)):
+            c = (m * w).sum(axis=1)
+            dd = max_dd(c)
+            row.append((sharpe_m(c), (c.sum() / y) / abs(dd) if dd < 0 else float("inf"),
+                        c.sum() / y / w.sum()))
+        ref = ref or row[1][0]
+        print(f"{name:<10}" + "".join(f"{w[k]:>6.2f}" for k in ["V2", "FS", "OI", "BM"])
+              + f"   {row[0][0]:>11.2f}{row[0][1]:>8.2f}   {row[1][0]:>10.2f}{row[1][1]:>8.2f}{row[1][2]:>+16,.0f}")
+    v2 = pd.Series({"V2": 1.0, "FS": 0, "OI": 0, "BM": 0})
+    c_t, c_v = m_test.mul(v2, axis=1).sum(axis=1), m_val.mul(v2, axis=1).sum(axis=1)
+    print(f"{'仅V2':<10}" + "".join(f"{v2[k]:>6.2f}" for k in ["V2", "FS", "OI", "BM"])
+          + f"   {sharpe_m(c_t):>11.2f}{(c_t.sum() / y_test) / abs(max_dd(c_t)):>8.2f}"
+          f"   {sharpe_m(c_v):>10.2f}{(c_v.sum() / y_val) / abs(max_dd(c_v)):>8.2f}"
+          f"{c_v.sum() / y_val:>+16,.0f}")
+    # 配对自举：同一组月份重抽，比较各方案与仅V2 的 VAL Sharpe 差（月数少，差异常在噪声内）
+    rng = np.random.default_rng(7)
+    n = len(m_val)
+    idx = rng.integers(0, n, size=(2000, n))
+    base_v = c_v.values[idx]
+    sr = lambda x: x.mean(axis=1) / x.std(axis=1, ddof=1) * 12 ** 0.5  # noqa: E731
+    print(f"VAL Sharpe 差 vs 仅V2（月度配对自举 2000 次，{n} 个月）:")
+    for name, w in fit_weights(m_test).items():
+        d = sr(m_val.mul(w, axis=1).sum(axis=1).values[idx]) - sr(base_v)
+        lo, hi = np.nanpercentile(d, [5, 95])
+        print(f"  {name:<10} 点估计 {np.nanmedian(d):+.2f}  90%CI [{lo:+.2f}, {hi:+.2f}]"
+              f"  P(优于仅V2) {np.nanmean(d > 0) * 100:.0f}%")
+    print("解读：Calmar = 年均$ ÷ |月度最大回撤$|。VAL 列是唯一的样本外证据；"
+          "TEST 列里最大Sharpe 必然最好（在 TEST 上拟合的），不说明问题。")
 
 
 def main():
@@ -96,8 +145,10 @@ def main():
         arm_dfs[arm] = df
     split = split_ts()
     val_hi = min(leg_window(a, args.pool, "VAL")[1] for a in ARMS)
-    report(arm_dfs, "TEST", (leg_window(ARMS[0], args.pool, "TEST")[0], split))
-    report(arm_dfs, "VAL", (split, val_hi))
+    test_w = (leg_window(ARMS[0], args.pool, "TEST")[0], split)
+    m_test, y_test = report(seg_parts(arm_dfs, "TEST", split), "TEST", test_w)
+    m_val, y_val = report(seg_parts(arm_dfs, "VAL", val_hi), "VAL", (split, val_hi))
+    weight_oos(m_test, m_val, y_test, y_val)
 
 
 if __name__ == "__main__":

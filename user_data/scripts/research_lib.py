@@ -108,6 +108,32 @@ def trades_frame(trades, seg=None):
     return df
 
 
+# ---------------------------------------------------------------- 月度序列
+def monthly_series(df, lo, hi):
+    """段内全日历月度 P&L（按平仓月；无交易月补 0）。
+
+    不补 0 的后果：低频臂的 Sharpe 被空月虚抬、相关系数只在"双方都有交易的月"上算，
+    portfolio_4arm 旧版 BM–OI 相关 TEST 0.68 / VAL 0.03 就是这么来的。
+    """
+    idx = pd.period_range(lo.tz_convert(None).to_period("M"), hi.tz_convert(None).to_period("M"), freq="M")
+    if df.empty:
+        return pd.Series(0.0, index=idx)
+    m = df.groupby(df["close_dt"].dt.tz_convert(None).dt.to_period("M"))["profit$"].sum()
+    return m.reindex(idx, fill_value=0.0)
+
+
+def sharpe_m(m):
+    """月度 P&L 的年化 Sharpe（无风险利率记 0；与资金规模无关，可跨臂比较）。"""
+    sd = m.std(ddof=1)
+    return float(m.mean() / sd * 12 ** 0.5) if sd > 0 else float("nan")
+
+
+def max_dd(m):
+    """月度累计 P&L 的最大回撤（$，负数）。"""
+    eq = m.cumsum()
+    return float(min((eq - eq.cummax()).min(), 0.0))
+
+
 # ---------------------------------------------------------------- 验证报告定位
 def _legs_from_sidecar(path):
     d = json.loads(path.read_text(encoding="utf-8"))

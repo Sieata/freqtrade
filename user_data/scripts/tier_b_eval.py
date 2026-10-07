@@ -3,6 +3,10 @@
 对指定事件臂策略计算提案中的增量门禁（--pool 口径，独立 $1,000/笔）：
   门禁4 信号重叠: 臂与 V2 同品种同 4h 入场的占比 ≤ 30%
   门禁5 组合增量: 加臂后组合年化(钱包) − V2 单独年化 ≥ +3pp（TEST/VAL 分别判）
+  门禁5b 风险调整增量（2026-10-07 提案 v2）: 月度 Sharpe 满足 SR_臂 > ρ × SR_V2
+         （ρ = 臂与 V2 月度 P&L 相关）。这是"加入该臂能提高组合最大 Sharpe"的充要条件，
+         与配比无关。门禁5 用 V2 钱包当分母，等于新臂资金免费——任何赚钱的臂都能过，
+         V2 自我复制实测 +19pp 通过；5b 下复制品 SR_臂 = 1.0 × SR_V2，不严格大于 → 不过。
   门禁6 最差月归一: 合并最差月 ÷ 双臂资金(2×$1,000) vs V2 最差月 ≤ 1.5
   门禁7 负年: VAL 段逐年收益率（÷$1,000）负年 ≤ 1 且最深 ≥ -15%
 
@@ -23,7 +27,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    STAKE, find_validation, load_arm, pool_wallet, read_result, split_ts,
+    STAKE, find_validation, load_arm, monthly_series, pool_wallet, read_result, sharpe_m, split_ts,
 )
 
 BASE = "WeekendReverseV2"
@@ -56,6 +60,9 @@ def eval_arm(arm, base_df, pool, windows, wallet):
         a = arm_df[(arm_df["seg"] == seg) & (arm_df["close_dt"] <= hi)]
         v = base_df[(base_df["seg"] == seg) & (base_df["close_dt"] <= hi)]
         s_a, s_v, s_c = (summarize(x, years, wallet) for x in (a, v, pd.concat([a, v])))
+        ma, mv = monthly_series(a, lo, hi), monthly_series(v, lo, hi)
+        rho = float(ma.corr(mv)) if ma.std() > 0 and mv.std() > 0 else 0.0
+        sr_a, sr_v, sr_c = sharpe_m(ma), sharpe_m(mv), sharpe_m(ma + mv)
         v2_keys = set(zip(v["pair"], v["open_dt"]))
         overlap = sum((p, o) in v2_keys for p, o in zip(a["pair"], a["open_dt"]))
         # 门禁6: 合并最差月÷双臂资金 vs V2 最差月÷单臂资金；V2 无亏月时任何合并亏月都算无穷大
@@ -69,6 +76,8 @@ def eval_arm(arm, base_df, pool, windows, wallet):
             "g5": (s_c["ann"] - s_v["ann"]) * 100,
             "g6": g6, "g6_worst_comb": s_c["worst"], "g6_worst_v2": s_v["worst"],
             "yearly": s_a["yearly"], "years": years,
+            "rho": rho, "sr_a": sr_a, "sr_v": sr_v, "sr_c": sr_c,
+            "g5b": sr_a - rho * sr_v,
         }
     return out
 
@@ -110,6 +119,11 @@ def main():
             g6 = "✅" if x["g6"] <= G6_MAX else "❌"
             print(f"  [{seg}] 门禁4 重叠 {x['g4']:.0f}%{g4}  门禁5 组合增量 {x['g5']:+.1f}pp{g5}  "
                   f"门禁6 最差月归一 {x['g6']:.2f}x{g6} (合并 {x['g6_worst_comb']:+,.0f}$ vs V2 {x['g6_worst_v2']:+,.0f}$)")
+        for seg in ("TEST", "VAL"):
+            x = r[seg]
+            g5b = "✅" if x["g5b"] > 1e-6 else "❌"
+            print(f"  [{seg}] 门禁5b SR臂 {x['sr_a']:.2f} vs ρ×SR_V2 = {x['rho']:+.2f}×{x['sr_v']:.2f}"
+                  f" → 余量 {x['g5b']:+.2f}{g5b}  （1:1 组合 Sharpe {x['sr_c']:.2f} vs V2 {x['sr_v']:.2f}）")
         yv = r["VAL"]["yearly"]
         neg = yv[yv < 0]
         depth = neg.min() / STAKE * 100 if len(neg) else 0.0

@@ -144,6 +144,9 @@ def analyze(stats, trades, max_open_trades=1):
     # max_drawdown_account（同一回测 20.2% vs 32.1%），VAL 回撤门禁系统性偏松。
     dd = float(stats.get("max_relative_drawdown") or 0.0)
     dd_acct = float(stats.get("max_drawdown_account") or 0.0)
+    # 钱包 = 池规模×1.2×$1,000，闲置资金会稀释回撤%（低频臂几乎不可能触 30% 线）；
+    # 另给"回撤折合几笔本金"（$回撤 ÷ $1,000）作不受池规模影响的参照
+    dd_slots = float(stats.get("max_drawdown_abs") or 0.0) / STAKE
     pf = stats.get("profit_factor")
     portfolio = {
         "trades": stats.get("total_trades", len(trades)),
@@ -152,6 +155,7 @@ def analyze(stats, trades, max_open_trades=1):
         "pf": pf if pf else (float("inf") if stats.get("profit_total_abs", 0) > 0 else 0.0),
         "dd": dd,
         "dd_acct": dd_acct,
+        "dd_slots": dd_slots,
         "pairs_profitable": len(prof_pairs),
         "pairs_total": len(pairs),
     }
@@ -218,7 +222,8 @@ def gate_check(split, portfolio, conc):
     if split == "VAL":
         res.append(("回撤≤30%", "PASS" if portfolio["dd"] <= g["max_dd"] else "FAIL",
                     f"{portfolio['dd'] * 100:.1f}%（钱包口径 max_relative_drawdown；"
-                    f"账户口径 {portfolio['dd_acct'] * 100:.1f}% 仅参考）"))
+                    f"账户口径 {portfolio['dd_acct'] * 100:.1f}% 仅参考；"
+                    f"折合 {portfolio['dd_slots']:.2f} 笔本金）"))
         if portfolio["trades"] < 20:
             res.append(("笔数≥20", "WARN", f"{portfolio['trades']} 笔（低频策略属正常，解读谨慎）"))
     if conc.get("top_pair") and conc["grand"] > 0:
@@ -330,6 +335,11 @@ def main():
         yearly_pct = " ".join(
             f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / STAKE * 100:+.1f}%"
             for y in years_list)
+        # 同一利润按钱包（池规模×1.2×$1,000）表达：÷$1,000 口径在 10 品种池里会显示 +300% 级数字
+        wallet = len(have) * 1.2 * STAKE
+        yearly_wallet = " ".join(
+            f"{y}:{sum(cell_map.get((p, y), 0.0) for p in pairs_list) / wallet * 100:+.1f}%"
+            for y in years_list)
         print(f"\n=== {pool.upper()} × {split_name} ({tr}，实际 {stats.get('backtest_start')} → "
               f"{stats.get('backtest_end')}) ===")
         print(f"trades={portfolio['trades']}  profit=${portfolio['profit_abs']:,.0f}  "
@@ -337,6 +347,7 @@ def main():
               f"dd={portfolio['dd'] * 100:.1f}%  盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}")
         print(ann)
         print(f"逐年收益率（每年重置 $1,000 本金，当年利润÷1000）: {yearly_pct}")
+        print(f"逐年收益率（钱包口径，当年利润÷${wallet:,.0f}，首尾年为不足年）: {yearly_wallet}")
         print("独立口径品种×年度（$1,000/笔）:")
         print(fmt_table(*table))
         for name, verdict, detail in gates:
@@ -356,6 +367,7 @@ def main():
                    f"dd={portfolio['dd'] * 100:.1f}% 盈利品种={portfolio['pairs_profitable']}/{portfolio['pairs_total']}",
                    f"**{ann}**",
                    f"逐年收益率（每年重置 $1,000 本金）: {yearly_pct}",
+                   f"逐年收益率（钱包口径 ÷${wallet:,.0f}，首尾年不足年）: {yearly_wallet}",
                    "",
                    "```", fmt_table(*table), "```", "", "| 门禁 | 结果 | 说明 |", "|---|---|---|"]
         report += [f"| {name} | {verdict} | {detail} |" for name, verdict, detail in gates]
