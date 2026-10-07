@@ -17,7 +17,7 @@ SPLITS_FILE = Path(__file__).resolve().parent.parent / "universe" / "splits.json
 
 
 def load_splits():
-    with open(SPLITS_FILE) as f:
+    with open(SPLITS_FILE, encoding="utf-8") as f:
         return json.load(f)
 
 

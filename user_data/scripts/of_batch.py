@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 STRAT = ROOT / "user_data" / "strategies" / "OIFlushV2.py"
 BT_DIR = ROOT / "user_data" / "backtest_results"
 TMP = Path("/tmp/of_batch")
-SRC = STRAT.read_text()
+SRC = STRAT.read_text(encoding="utf-8")
 
 PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "BNB/USDT:USDT", "XRP/USDT:USDT", "SOL/USDT:USDT",
          "TRX/USDT:USDT", "ZEC/USDT:USDT", "DOGE/USDT:USDT", "XMR/USDT:USDT", "HYPE/USDT:USDT"]
@@ -37,7 +37,7 @@ def make_variant(q, h):
 def run_one(name, text):
     TMP.mkdir(parents=True, exist_ok=True)
     f = TMP / f"{name}.py"
-    f.write_text(text)
+    f.write_text(text, encoding="utf-8")
     before = set(BT_DIR.glob("backtest-result-*.zip"))
     env = os.environ.copy()
     env.setdefault("https_proxy", "http://127.0.0.1:7897")

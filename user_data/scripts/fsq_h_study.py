@@ -34,7 +34,7 @@ STAKE = 1000
 def load_pool(name):
     """pairs_<name>.txt → 剔注释后的 pair 列表（生成日快照）。"""
     out = []
-    for line in (UNIVERSE / f"pairs_{name}.txt").read_text().splitlines():
+    for line in (UNIVERSE / f"pairs_{name}.txt").read_text(encoding="utf-8").splitlines():
         pair = line.split("#", 1)[0].strip()
         if pair:
             out.append(pair)
@@ -54,7 +54,7 @@ def have_data(pairs, timeframe="4h"):
 def run_backtest(name, text, pairs, fee=None):
     tmp = Path(tempfile.gettempdir()) / "fsq_h_study"
     tmp.mkdir(parents=True, exist_ok=True)
-    (tmp / f"{name}.py").write_text(text)
+    (tmp / f"{name}.py").write_text(text, encoding="utf-8")
     before = set(BT_DIR.glob("backtest-result-*.zip"))
     cmd = [
         sys.executable, "-m", "freqtrade", "backtesting",

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 STRAT = ROOT / "user_data" / "strategies" / "FundingSqueezeV1.py"
 BT_DIR = ROOT / "user_data" / "backtest_results"
 TMP = Path("/tmp/fsq_batch")
-SRC = (STRAT).read_text()
+SRC = (STRAT).read_text(encoding="utf-8")
 
 PAIRS = ["BTC/USDT:USDT", "ETH/USDT:USDT", "BNB/USDT:USDT", "XRP/USDT:USDT", "SOL/USDT:USDT",
          "ZEC/USDT:USDT", "DOGE/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT", "DOT/USDT:USDT"]
@@ -51,7 +51,7 @@ def make_variant(q, h, win=540):
 def run_one(name, text, timerange=TR_TEST):
     TMP.mkdir(parents=True, exist_ok=True)
     f = TMP / f"{name}.py"
-    f.write_text(text)
+    f.write_text(text, encoding="utf-8")
     before = set(BT_DIR.glob("backtest-result-*.zip"))
     import os
 

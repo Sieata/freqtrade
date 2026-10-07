@@ -189,13 +189,13 @@ def main():
     if not args.volume_only:
         print("生成 CORE 池（CoinGecko 市值榜）...", flush=True)
         core = build_core(ex, args.core_top, perp, onboard, today)
-        (UNIVERSE_DIR / "pairs_core.txt").write_text(core)
+        (UNIVERSE_DIR / "pairs_core.txt").write_text(core, encoding="utf-8")
         n = len([l for l in core.splitlines() if l and not l.startswith("#")])
         print(f"  → user_data/universe/pairs_core.txt ({n} 个)")
     if not args.core_only:
         print("生成 VOLUME 池（24h 成交量榜）...", flush=True)
         vol = build_volume(ex, args.volume_top, perp, onboard, today)
-        (UNIVERSE_DIR / "pairs_volume.txt").write_text(vol)
+        (UNIVERSE_DIR / "pairs_volume.txt").write_text(vol, encoding="utf-8")
         n = len([l for l in vol.splitlines() if l and not l.startswith("#")])
         print(f"  → user_data/universe/pairs_volume.txt ({n} 个)")
 
