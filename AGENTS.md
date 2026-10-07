@@ -1,7 +1,16 @@
 # AGENTS.md — 本仓库工作常识（给 AI 会话 / 新会话速查）
 
 > 详细版（症状→根因→解法）：`user_data/docs/ENGINEERING_NOTES.md`。
-> 策略研究纪律：`STRATEGY_WORKFLOW.md`；研究结论与失败记录：`RESEARCH.md`。
+> 策略研究纪律：`STRATEGY_WORKFLOW.md`；研究结论与失败记录：`RESEARCH.md`（顶部「当前状态」= 一页总览）。
+
+## 项目方向（2026-10-07 起：收缩，挖出可用策略）
+
+- **目标只有一个**：把 WeekendReverseV2（引擎）+ OIFlushV2（唯一过 Tier B 的臂）推到可实盘。
+- 在用策略 4 个：V2（paper 中）、OIFlushV2（12 月初 paper）、FundingSqueezeV1L / BigMoveV1
+  （paper 跑完各自 FREEZE 评审即止，不再投入研究）。其余在 `strategies/archive/`。
+- **已收线，未经用户明确要求不得重启**：新策略族搜索、套利/市场中性（含 H8c 模拟器）、单品种 CTA、
+  合成期权。对应脚本在 `user_data/scripts/archive/`（未迁移 research_lib，复用前先迁移）。
+- 不再扩建分析框架；工具层只做维护（bug 修复 + 单测）。
 
 ## 环境
 
@@ -22,54 +31,36 @@
 ## 常用命令
 
 ```bash
-# 回测（--cache none 对账纪律；pairs 必须用数组传参，zsh 不分词）
-P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/USDT:USDT CYS/USDT:USDT HYPE/USDT:USDT)
-.venv/bin/python -m freqtrade backtesting --config user_data/config_perpetual.json \
-  --strategy WeekendReverseV2 --timerange 20220101-20260828 --pairs $P8 --cache none --export trades
+# 数据（每会话 / paper 设备 cron）：K线/funding 增量 + OI 累积 + metrics，跑完校验接缝
+./refresh_all.sh                                                     # Windows 用 Git Bash 跑；PowerShell 用 .\ensure-data.ps1 [池文件]
+.venv/bin/python user_data/scripts/data_check.py --pools top10       # 退出码 1 = 有缺口/重复
 
-# 结果速览 / 币池独立口径复核
-.venv/bin/python user_data/scripts/bt_summary.py <result.zip>
-.venv/bin/python user_data/scripts/pool_review.py <result.zip> --worst 10
-
-# 单年/单区间切片（独立 $1,000/笔，口径同 validate；--monthly 加月度与品种分布）
-.venv/bin/python user_data/scripts/year_slice.py --year 2026 --pools top10,top5,top2 --monthly
-.venv/bin/python user_data/scripts/year_slice.py --year 2026 --pools top10 --fee 0.001   # 摩擦压力
-
-# 单臂统计质量（逐笔 t 检验 + 自举 CI + 去最赚 1 笔 + 集中度）
-.venv/bin/python user_data/scripts/arm_stats.py --pool top5 --arms WeekendReverseV2,CrashBuyV2
-.venv/bin/python user_data/scripts/exit_anatomy.py <result.zip>   # 出场结构/浮亏深度/止损反事实/保本胜率
-
-# 仓位轴扫描（比例仓位只能靠临时 config，CLI 无 --tradable-balance-ratio）
-.venv/bin/python user_data/scripts/sizing_sweep.py --strategy WeekendReverseV2 \
-  --timerange 20220101-20240828 --pool top10
-
-# 标准化验证（2026-08-28 起新研究强制，口径详见 STRATEGY_WORKFLOW.md 第〇节）
-.venv/bin/python user_data/scripts/time_splits.py                    # 打印冻结的 TEST/VAL timerange
-.venv/bin/python user_data/scripts/make_universe.py                  # 重生成币池快照 core50/volume30（需代理）
-.venv/bin/python user_data/scripts/validate_strategy.py --strategy X # 一键 TEST+VAL × core+volume + 门禁 + 报告
-#   --pool top5 / top10 / core / volume / both（top5=纯蓝筹 BTC/ETH/BNB/XRP/SOL，剥离中盘贡献用）
-.venv/bin/python user_data/scripts/arm_stats.py --pool top5          # 单臂统计质量表（逐笔 t 检验+自举 CI+集中度）
-.venv/bin/python user_data/scripts/tier_b_eval.py --pool top10       # Tier B 增量门禁（--arms 可加 CrashBuyV2 等；基准 V2 与各臂须有同池验证报告）
-.venv/bin/python user_data/scripts/portfolio_4arm.py --pool top10    # 四臂组合（V2+FS+OI+BM）sleeve 模型：逐年/相关矩阵/LOO
-.venv/bin/python user_data/scripts/funding_spread_scan.py --deep 56  # 跨所费差扫描（币安×Hyperliquid + 14天持续性深查）
-.venv/bin/python user_data/scripts/cross_arb_research.py --mode both --pool top10   # 跨品种套利（费率分散 + 协整价差）
-.venv/bin/python user_data/scripts/basis_arb_research.py --mode spotperp --rule funding_pos --enter-bp 5 --exit-bp -2
-.venv/bin/python user_data/scripts/cm_perp_delivery_research.py    # 币本位永续×交割（cm 桶 + dapi 全历史 funding，含覆盖率体检）
-#   ↑ 单所跨工具套利：spotperp=多现货+空永续；calendar=多现货+空季度（--thresh/--horizon）
-./ensure-data.sh user_data/universe/pairs_volume.txt                 # 按币池快照补数据（新品种 funding 老数据走 import_funding_vision.py）
-.venv/bin/python user_data/scripts/data_check.py --pools top10,core,volume   # 数据接缝校验（最新时间戳/缺口/重复；退出码可作 cron 告警）
-
-# paper forward-test（V2 进行中 + FS 组合臂 2026-08-29 起）
-./user_data/scripts/paper_start.sh        # V2 启动（内置 SHA 校验，不匹配拒绝启动）
-./user_data/scripts/paper_start_fs.sh     # FundingSqueezeV1L 启动（独立 config/db/端口 8081，可同机并行）
-.venv/bin/python user_data/scripts/paper_status.py   # 周记录（V2 db）
-# OI 累积器（paper 设备每日 cron，为 OIFlush live 攒历史；漏跑无法回补）：
+# paper forward-test（paper 设备）
+./user_data/scripts/paper_start.sh          # V2（内置 SHA 校验，不匹配拒绝启动）
+./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28）
+./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082，FREEZE_BIGMOVE）
+.venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
+.venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
+# OI 累积器 cron（OIFlush live 前置，漏跑无法回补）：
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
-# BigMove paper（Tier B 组合臂，2026-08-29 起判据见 paper/FREEZE_BIGMOVE.md）：
-./user_data/scripts/paper_start_bigmove.sh   # 第三实例（端口 8082，db 独立）
-# H8c 双腿基差套利 paper 模拟器（2026-08-29 起判据见 paper/FREEZE_H8C.md；模拟交易非 freqtrade 策略）：
-./user_data/scripts/h8c_paper_start.sh   # SHA 校验 + 跑一轮；常驻监控（paper 设备 cron）：
-# 17 * * * * cd <repo> && .venv/bin/python user_data/scripts/h8c_paper.py >> user_data/logs/h8c_paper.log 2>&1
+
+# 验证链（STRATEGY_WORKFLOW 第〇节 + 4.3）
+.venv/bin/python user_data/scripts/validate_strategy.py --strategy X --pool top10   # TEST+VAL + 门禁 + 报告(.md+.json)
+.venv/bin/python user_data/scripts/tier_b_eval.py --pool top10 [--arms A,B]         # Tier B 门禁 1–7 逐条判定
+.venv/bin/python user_data/scripts/portfolio_4arm.py --pool top10 [--arms OIFlushV2] # 组合 + 配比样本外检验
+.venv/bin/python user_data/scripts/arm_stats.py --pool top10                        # 单臂显著性 / 月聚类 CI / 集中度
+.venv/bin/python user_data/scripts/year_slice.py --year 2026 --pools top10 --monthly # 单年切片（--fee 摩擦压力）
+.venv/bin/python user_data/scripts/sizing_sweep.py --strategy WeekendReverseV2 --timerange 20220101-20240828 --pool top10
+
+# 单个结果 zip
+.venv/bin/python user_data/scripts/bt_summary.py <zip>
+.venv/bin/python user_data/scripts/pool_review.py <zip> --worst 10
+.venv/bin/python user_data/scripts/exit_anatomy.py <zip>
+.venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB>
+
+# 其他：time_splits.py（打印切分）/ make_universe.py（重生成池快照，需代理）/
+# import_funding_vision.py（新品种 funding 老数据）/ conn_probe.py（端点连通性）/ dep_closure.py（装环境）
+# 单测：.venv/Scripts/python.exe -m pytest user_data/scripts/tests -q -p no:cacheprovider
 ```
 
 ## 研究纪律（2026-08-28 起新研究强制）
@@ -99,8 +90,8 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
   `portfolio_full.py` 已删（被 portfolio_4arm 替代）。
   月度统计一律用 `research_lib.monthly_series`（全日历，空月记 0），否则低频臂的 Sharpe/相关是噪声。
   已迁移（2026-10-07）：validate / tier_b_eval / arm_stats / portfolio_4arm / signal_recon / year_slice /
-  exit_anatomy / arm_compare / pool_review / sizing_sweep / data_check / time_splits / idea_screen /
-  signal_stack_check。回测一律走 `research_lib.run_backtest`（独立临时目录导出，并行安全）；
+  exit_anatomy / arm_compare / pool_review / sizing_sweep / data_check / time_splits
+  （idea_screen / signal_stack_check 已迁移后又随收缩归档）。回测一律走 `research_lib.run_backtest`（独立临时目录导出，并行安全）；
   $ 统计一律 `profit_ratio × $1,000`，不用 `profit_abs`（复利 zip 下是路径数字）。
   未迁移 = 结论已固化的一次性研究脚本（weekend_* / carry_* / *_phase1 / *_batch / synth_put_* 等），
   复用前先迁移。改 research_lib 后必跑：`.venv/Scripts/python.exe -m pytest user_data/scripts/tests -q -p no:cacheprovider`。
@@ -125,7 +116,7 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 
 ## 禁改 / 高危
 
-- **`user_data/strategies/WeekendReverseV1.py` 与 `WeekendReverseV2.py` 不可改动**：SHA 已冻结，
+- **`user_data/strategies/WeekendReverseV2.py` 不可改动**（V1 已于 2026-10-07 退役归档）：SHA 已冻结，
   paper forward-test 进行中，改动 = 测试作废（paper/FREEZE_V2.md）。改参数做实验用副本或策略参数文件。
 - forward-test 期间只记录不改参数；判据与周期见 `user_data/paper/FREEZE_V2.md`。
 
@@ -147,7 +138,7 @@ P8=(BTC/USDT:USDT ETH/USDT:USDT SOL/USDT:USDT XRP/USDT:USDT ZEC/USDT:USDT BANK/U
 - 文档"钱包口径回撤" = `max_relative_drawdown`。
 - dry-run DB 路径要显式配置（`db_url`），默认落在 CWD。
 - 回测不含滑点；摩擦测试用 `--fee` 覆盖。
-- **`.sh` 工具链已加固（2026-09-21）**：ensure-data / refresh_all / paper_start* / h8c_paper_start
+- **`.sh` 工具链已加固（2026-09-21）**：ensure-data / refresh_all / paper_start*
   全部改为纯 bash 内建 + venv python，不再依赖 dirname/sed/tr/cut/shasum/mkdir/nohup/cat/date，
   受限 shell（如 WorkBuddy 内置 bash，PATH 无基础命令）可直接运行；SHA 校验用 python hashlib，
   与 shasum 结果一致（四个冻结 SHA 已实测比对通过）。但**临时拼的命令行**仍会踩 PATH 缺失

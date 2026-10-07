@@ -8,10 +8,10 @@
 
 ## 一、当前策略库（权威状态）
 
-**现势状态以 `user_data/docs/STATUS_20260829.md` 为唯一权威**（每日收敛快照）。当前构成：
-V2 引擎（TOP10 全门禁，paper 中）+ 三 Tier B 事件臂（BigMove/FS paper 待启动、OIFlushV2 12 月）
-+ CrashBuy（观察名单）+ 归档（V1/OIFlushV1/carry 族）。TOP10 口径的逐年收益与门禁明细见
-RESEARCH 十~十二与各 FREEZE 文档。下表为 2026-08-16 的历史快照，**数字已过时勿引用**：
+**现势状态以 `RESEARCH.md` 顶部「当前状态」为唯一权威**（2026-10-07 项目收缩后）。当前构成：
+V2 引擎（paper 中）+ OIFlushV2（唯一过 Tier B，12 月初 paper）+ FS/BigMove（paper 跑完评审即止）；
+其余归档于 `user_data/strategies/archive/`（附归档原因）。旧快照 STATUS_20260829 已移入 `docs/archive/`。
+下表为 2026-08-16 的历史快照，**数字已过时勿引用**：
 
 ## 二、过拟合对照（源码已删，仅存测量记录）
 
@@ -54,10 +54,4 @@ RESEARCH 十~十二与各 FREEZE 文档。下表为 2026-08-16 的历史快照�
 
 ## 五、当前状态
 
-| 项目 | 状态 |
-|---|---|
-| WeekendReverseV1 | 已冻结，paper forward-test 进行中（`user_data/paper/FREEZE.md` 记录判据：胜率 ≥70%、回撤 ≤30%、≥20 笔、利润 >0） |
-| WeekendReverseV2 | 已冻结（2026-08-16） |
-| 数据刷新复跑（2026-08-28） | 数据更新至 08-28：V2 全期 553 笔 / +$525,857（PF 2.10），冻结后新窗口 16 笔 +$150,527 为正；冻结基线差异系暖机口径（详见 `paper/FREEZE_V2.md` 第八节） |
-| BigMoveV1 / CrashBuyV1 | 已定版，未实盘 |
-| 研究文档 | `RESEARCH.md`（结论+失败记录）、`STRATEGY_WORKFLOW.md`（研发流程） |
+见 `RESEARCH.md` 顶部「当前状态」（本节旧表含已退役的 V1 / CrashBuyV1，2026-10-07 删除）。

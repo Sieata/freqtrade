@@ -4,6 +4,39 @@
 
 ---
 
+## 当前状态（2026-10-07 收缩后，一页总览——新会话从这里读起）
+
+**方向**：项目收缩，只做一件事——把可用策略推到实盘。新策略族搜索、套利/市场中性（含 H8c）、
+单品种 CTA、合成期权已收线（用户批准），未经明确要求不重启。框架只维护不扩建。
+
+**可用策略（证据，TOP10 口径，逐年 % = ÷钱包，见 STRATEGY_WORKFLOW 0.4 v2）**
+
+| 策略 | 角色 | 证据 | 下一步 |
+|---|---|---|---|
+| **WeekendReverseV2** | 引擎 | 唯一 TEST/VAL 双段显著（p < 1e-5，月聚类 CI 不含 0）；钱包年化 TEST +19.1% / VAL +16.1% | paper 中（冻结 2026-08-16，FREEZE_V2 判据：≥20 笔、胜率 ≥70%、回撤 ≤30%、利润 >0） |
+| **OIFlushV2** | 唯一合格事件臂 | Tier B 门禁 1–7 全过；V2+OI 过配比纪律（VAL Calmar 4.84 vs 仅 V2 3.85） | 12 月初 OI 历史满 60 天 → paper 包；配比 0.5–1.0×V2 |
+
+FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–79% 来自单一中盘币），
+paper 跑完 FREEZE 评审即止，不再研究。其余策略在 `user_data/strategies/archive/`（附归档原因）。
+
+**待决（按重要性）**
+
+1. **V2 的 paper 配置 ≠ 评估配置。** paper（冻结）= 8 品种（含 BANK/CYS 小币）、满仓复利、
+   max_open_trades=1；所有门禁/显著性/组合分析 = TOP10、每笔固定 $1,000、并发至多 10。
+   paper 通过只证明前者。上实盘前须定：按哪套配置上；若按 TOP10 固定仓位，需要一段对应的
+   paper（或至少 signal_recon 对账证明信号一致）。**不改冻结中的 paper**。
+2. OIFlushV2 paper 包（12 月初）：live 数据路径（OI 累积器）+ dry-run，与 V2 同口径。
+3. 实盘资金规模与仓位：sizing_sweep 结果 + V2+OI 合并回撤。
+
+**日常**：每会话 `refresh_all.sh`；paper 周报 `paper_status.py`；月度 `signal_recon.py`；
+paper 设备 cron：OI 累积器（保留）、h8c_paper（**已收线，需手动删除**）、V1 实例（**已退役，需停**）。
+
+**路径变更**：2026-10-07 起一次性研究脚本移入 `user_data/scripts/archive/`、退役策略移入
+`user_data/strategies/archive/`、V1/H8c 的 paper 文档移入 `user_data/paper/archive/`。
+下文引用的这些路径加 `archive/` 即可找到；本节之前的逐年 % 为旧口径（÷$1,000，TOP10 换算 ÷12）。
+
+---
+
 ## 核心结论
 
 **WeekendReverseV1 是当前最强普适策略**（8/8 盈利，样本外通过）。**BigMoveV1（2026-08-10 新增）是第二个正式策略**——1d 大动量顺势，含 BTC 市场过滤，freqtrade 回测 +168.8%、回撤 27.8%。CrashBuyV1 作为低频互补策略。
