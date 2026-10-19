@@ -263,3 +263,24 @@ def test_gbk_console_cannot_print_gate_marks():
     w.write("门禁 ✅")
     w.flush()
     assert "✅" in buf.getvalue().decode("utf-8")
+
+
+# ---------------------------------------------------------------- PF 口径（不依赖 stats）
+def test_trade_pf_from_trades_uses_profit_abs():
+    """固定仓位回测里 stake 会在余额约束下浮动（V2 VAL 最低 916.9），
+    profit_ratio×1000 与 profit_abs 差得出 0.002 的 PF —— 必须用后者，才能与
+    freqtrade 自己的 profit_factor 逐位一致。"""
+    trades = [
+        {"profit_abs": 10.0, "profit_ratio": 0.0100, "stake_amount": 950},
+        {"profit_abs": -4.0, "profit_ratio": -0.0050, "stake_amount": 800},
+        {"profit_abs": 6.0, "profit_ratio": 0.0060, "stake_amount": 1000},
+    ]
+    assert rl.trade_pf_from_trades(trades) == pytest.approx(16 / 4)
+    # 反例：按 ratio×1000 会得到 (10+6)/5 = 3.2，与真实 4.0 不同
+    assert rl.trade_pf(pd.Series([t["profit_ratio"] * 1000 for t in trades])) == pytest.approx(3.2)
+
+
+def test_trade_pf_from_trades_fallbacks():
+    assert rl.trade_pf_from_trades([]) == 0.0
+    # 缺 profit_abs 的旧 zip → 回退 ratio × stake
+    assert rl.trade_pf_from_trades([{"profit_ratio": 0.02}, {"profit_ratio": -0.01}], stake=500) == 2.0

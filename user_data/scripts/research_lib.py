@@ -296,6 +296,25 @@ def trade_pf(p, inf_if_no_loss=True):
     return float("inf") if inf_if_no_loss else 0.0
 
 
+def trade_pf_from_trades(trades, stake=STAKE):
+    """从逐笔交易算 PF，不依赖 freqtrade 的 stats["profit_factor"]。
+
+    用 profit_abs（已实现净额，含手续费/funding）而非 profit_ratio × $1,000——
+    后者假设每笔本金恰为 $1,000，而固定仓位回测里 stake 会在余额约束下浮动
+    （实测 V2 VAL 最低 916.9），两者能差出 0.002 的 PF。profit_abs 与 freqtrade
+    自己的 PF 逐位一致，且对复利 zip 仍然只是"该笔真实赚了多少"。
+
+    trades 缺 profit_abs 时回退 profit_ratio × stake。
+    """
+    if not trades:
+        return 0.0
+    if all("profit_abs" in t for t in trades):
+        p = pd.Series([float(t["profit_abs"]) for t in trades])
+    else:
+        p = pd.Series([float(t["profit_ratio"]) * stake for t in trades])
+    return trade_pf(p)
+
+
 def concentration(df, denom="profit"):
     """集中度三件套：(最大品种, 其利润占比, 其利润最好一年占该品种利润比)。
 

@@ -41,7 +41,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
     REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, enable_utf8_console, load_pool, load_splits,
-    read_result, result_span_years, run_backtest, trade_pf,
+    read_result, result_span_years, run_backtest, trade_pf_from_trades,
 )
 
 VAL_LEDGER = UNIVERSE / "val_ledger.jsonl"
@@ -105,12 +105,14 @@ def analyze(stats, trades, max_open_trades=1):
     # 钱包 = 池规模×1.2×$1,000，闲置资金会稀释回撤%（低频臂几乎不可能触 30% 线）；
     # 另给"回撤折合几笔本金"（$回撤 ÷ $1,000）作不受池规模影响的参照
     dd_slots = float(stats.get("max_drawdown_abs") or 0.0) / STAKE
-    pf = stats.get("profit_factor")
+    # PF 一律从逐笔 profit_abs 自算，不读 stats["profit_factor"]：两者数学等价
+    # （已验证逐位相同），但自算把口径锁在可见的逐笔数据上，且复利 zip 也不会
+    # 因为"每笔本金不同"而失真。
     portfolio = {
         "trades": stats.get("total_trades", len(trades)),
         "profit_abs": stats.get("profit_total_abs", 0.0),
         "win_rate": stats.get("winrate", 0.0),
-        "pf": pf if pf else trade_pf(pd.Series([t["profit_ratio"] * STAKE for t in trades])),
+        "pf": trade_pf_from_trades(trades),
         "dd": dd,
         "dd_acct": dd_acct,
         "dd_slots": dd_slots,
