@@ -23,7 +23,7 @@ agent_created: true
 | 数据目录 | `user_data/data/binance/futures/` |
 | 文件名 | `<PAIR>_<QUOTE>_<SETTLE>-<tf>-futures.feather`（`BTC/USDT:USDT` → `BTC_USDT_USDT`） |
 | 代理 | `http://127.0.0.1:7897`（Clash），国内直连 binance 不通 |
-| Python | `.venv/Scripts/python.exe`（Windows 布局；Unix 为 `.venv/bin/python`） |
+| Python | `.venv/Scripts/python.exe`（本机 Windows 布局；`.venv/bin/python` 在本仓库不存在） |
 | 起始日期 | **一律从 2021-01-01 起**（4h 策略需 250 根暖机，见 FREEZE_V2 第八节） |
 
 ## 步骤
@@ -75,7 +75,7 @@ dirname/sed/tr/cut/shasum/mkdir/nohup/cat/date，受限 shell 可直接运行。
 ### 4. 接缝校验（必做）
 
 ```bash
-.venv/bin/python user_data/scripts/data_check.py --pools top10,core,volume
+.venv/Scripts/python.exe user_data/scripts/data_check.py --pools top10,core,volume
 # 可选：--pairs BTC/USDT:USDT,... 显式指定；--since 2026-01-01 只看尾段；
 # 退出码 0=干净 / 1=有问题（可直接作 cron 告警条件）
 ```
