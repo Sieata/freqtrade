@@ -25,7 +25,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    STAKE, boot_ci, cluster_boot_ci, load_arm, one_sided_t_p, pool_bases,
+    STAKE, boot_ci, cluster_boot_ci, load_arm, one_sided_t_p, pool_bases, trade_pf,
 )
 
 DEFAULT_ARMS = ["WeekendReverseV2", "OIFlushV2", "BigMoveV1", "FundingSqueezeV1L"]
@@ -35,8 +35,6 @@ def summarize(df, dim="seg"):
     out = {}
     for seg, g in df.groupby(dim):
         p = g["profit$"]
-        gw = p[p > 0].sum()
-        gl = -p[p < 0].sum()
         best = p.max()
         total = p.sum()
         # 集中度：利润为正时按占利润比；为负时按占绝对亏损比（此时 >100% 表示最赚一笔仍亏）
@@ -45,7 +43,7 @@ def summarize(df, dim="seg"):
         out[seg] = {
             "n": len(g), "total": total, "mean": p.mean(), "median": p.median(),
             "win": (p > 0).mean() * 100,
-            "pf": (gw / gl if gl > 0 else float("inf")),
+            "pf": trade_pf(p),
             "p": one_sided_t_p(p), "ci": boot_ci(p), "ci_m": cluster_boot_ci(g),
             "best": best, "best_share": (best / denom * 100) if denom else float("nan"),
             "ex_best": total - best,

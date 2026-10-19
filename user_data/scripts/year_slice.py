@@ -4,8 +4,8 @@
 自然年（默认 2026），用与验证脚本**完全相同**的独立口径（每笔固定 $1,000、
 max_open_trades = 池内品种数、--cache none）重跑并出表。
 
-口径约定（STRATEGY_WORKFLOW 第〇节 0.4）：
-  - 逐年收益率 = 当年利润 ÷ $1,000（每年重置本金，跨年不复利不共用额度）
+口径约定（STRATEGY_WORKFLOW 第〇节 0.4 v2，2026-10-07 起）：
+  - 逐年收益率 = 当年利润 ÷ **钱包**（池规模 × 1.2 × $1,000），每年重置钱包、跨年不复利
   - 每笔期望、胜率、PF、p 值、自举 CI、去最赚 1 笔、最大品种占比 均按独立口径算
   - 除 V2/V1 外无冻结问题；这些年份落在已消费 VAL 窗口内属描述性复核，**不得据此调参**
 
@@ -25,7 +25,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
     ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, one_sided_t_p, read_result, result_wallet,
-    run_backtest as _run, trades_frame,
+    run_backtest as _run, trade_pf, trades_frame,
 )
 
 # 策略 → config（BigMove 需要自己的 config，别的一律 perpetual）
@@ -50,12 +50,11 @@ def stats_from_zip(zip_path):
     df = trades_frame(trades)
     p = df["profit$"]
     total = p.sum()
-    gw, gl = p[p > 0].sum(), -p[p < 0].sum()
     mon = df.groupby(df["close_dt"].dt.strftime("%Y-%m"))["profit$"].sum()
     share = df.groupby("pair_base")["profit$"].sum()
     return {
         "n": len(df), "total": total, "mean": p.mean(), "win": (p > 0).mean() * 100,
-        "pf": gw / gl if gl > 0 else float("inf"),
+        "pf": trade_pf(p),
         "p": one_sided_t_p(p), "ci": boot_ci(p), "ci_m": cluster_boot_ci(df),
         "ex_best": total - p.max(), "best_share": p.max() / total * 100 if total else float("nan"),
         "top_pair": share.idxmax(), "top_share": share.max() / total * 100 if total else float("nan"),

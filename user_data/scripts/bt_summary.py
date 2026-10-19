@@ -7,34 +7,30 @@
   ddA = max_drawdown_account  —— 账户口径，数值明显偏小，仅作参考
 两者在满仓复利下差异极大（同一次回测 32.1% vs 20.2%），只看 ddA 会低估风险。
 """
-import json
 import sys
-import zipfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research_lib import iter_results  # noqa: E402
 
 
 def summarize(zip_path):
-    with zipfile.ZipFile(zip_path) as z:
-        for n in z.namelist():
-            if not n.endswith(".json"):
-                continue
-            d = json.loads(z.read(n))
-            if not (isinstance(d, dict) and "strategy" in d):
-                continue
-            for name, s in d["strategy"].items():
-                ddw = float(s.get("max_relative_drawdown", 0) or 0)
-                dda = float(s.get("max_drawdown_account", 0) or 0)
-                tspan = d.get("timerange") or (
-                    f"{str(s.get('backtest_start', ''))[:10]}~"
-                    f"{str(s.get('backtest_end', ''))[:10]}")
-                print(f"{zip_path.split('/')[-1][:44]:<44} {name:<20} "
-                      f"trades={s.get('total_trades','?'):>4} "
-                      f"profit={s.get('profit_total_abs', 0):>12,.0f}$ "
-                      f"({s.get('profit_total', 0)*100:>7.2f}%) "
-                      f"win%={s.get('winrate', 0)*100:>5.1f} "
-                      f"PF={s.get('profit_factor', 0):>5.2f} "
-                      f"ddW={ddw*100:>5.1f}% ddA={dda*100:>5.1f}% "
-                      f"[{tspan}]")
-            return
+    for name, s, _, meta in iter_results(zip_path):
+        ddw = float(s.get("max_relative_drawdown", 0) or 0)
+        dda = float(s.get("max_drawdown_account", 0) or 0)
+        tspan = meta.get("timerange") or (
+            f"{str(s.get('backtest_start', ''))[:10]}~"
+            f"{str(s.get('backtest_end', ''))[:10]}")
+        # 裸文件名（常见的 `*.zip` 通配结果）不能直接 split('/') 取末段
+        print(f"{Path(zip_path).name[:44]:<44} {name:<20} "
+              f"trades={s.get('total_trades','?'):>4} "
+              f"profit={s.get('profit_total_abs', 0):>12,.0f}$ "
+              f"({s.get('profit_total', 0)*100:>7.2f}%) "
+              f"win%={s.get('winrate', 0)*100:>5.1f} "
+              f"PF={s.get('profit_factor', 0):>5.2f} "
+              f"ddW={ddw*100:>5.1f}% ddA={dda*100:>5.1f}% "
+              f"[{tspan}]")
+        return
     print(f"{zip_path}: no strategy results found")
 
 

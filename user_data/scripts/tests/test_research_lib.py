@@ -180,3 +180,86 @@ def test_stats_helpers(sandbox):
               ("2023-03-05", "2023-03-06", 0.015), ("2023-03-07", "2023-03-08", 0.005)])
     lo, hi = rl.cluster_boot_ci(df)
     assert lo <= df["profit$"].mean() <= hi
+
+
+# ---------------------------------------------------------------- 逐笔汇总（2026-10 去重）
+def test_trade_pf(sandbox):
+    assert rl.trade_pf(pd.Series([10.0, -5, 20, -15])) == pytest.approx(30 / 20)
+    assert rl.trade_pf(pd.Series([10.0, 20])) == float("inf")     # 无亏损笔 → ∞
+    assert rl.trade_pf(pd.Series([-10.0])) == 0.0                # 只有亏损
+    assert rl.trade_pf(pd.Series([], dtype=float)) == 0.0         # 无交易 ≠ 完美策略
+    assert rl.trade_pf(pd.Series([10.0, 20]), inf_if_no_loss=False) == 0.0
+
+
+def test_concentration(sandbox):
+    single = _df([("2022-02-01", "2022-02-02", 0.10), ("2023-02-01", "2023-02-02", 0.05)])
+    top, share, best = rl.concentration(single)
+    # 单品种 → 占比 100%；该品种利润 150 中 2022 年占 100 → 最优年集中 2/3
+    assert top == "BTC" and share == pytest.approx(1.0) and best == pytest.approx(2 / 3)
+
+    mixed = rl.trades_frame([
+        _trade("BTC/USDT:USDT", "2023-02-01", "2023-02-02", 0.30),
+        _trade("ETH/USDT:USDT", "2023-02-01", "2023-02-02", 0.10),
+    ])
+    top, share, best = rl.concentration(mixed)
+    assert top == "BTC" and share == pytest.approx(0.75) and best == pytest.approx(1.0)
+
+    losing = rl.trades_frame([_trade("BTC/USDT:USDT", "2023-02-01", "2023-02-02", -0.10)])
+    assert rl.concentration(losing) is None      # 总利润 ≤ 0 时占比无意义
+
+
+def test_yearly_pnl(sandbox):
+    df = rl.trades_frame([
+        _trade("BTC/USDT:USDT", "2022-02-01", "2022-02-02", 0.10),
+        _trade("BTC/USDT:USDT", "2023-02-01", "2023-02-02", -0.05),
+        _trade("ETH/USDT:USDT", "2023-03-01", "2023-03-02", 0.02),
+    ])
+    assert rl.yearly_pnl(df) == {"2022": pytest.approx(100.0), "2023": pytest.approx(-30.0)}
+    pct = rl.yearly_pnl(df, wallet=1000)
+    assert pct["2022"][1] == pytest.approx(0.10) and pct["2023"][1] == pytest.approx(-0.03)
+
+
+def test_leg_window(sandbox):
+    _zip(sandbox / "bt" / "backtest-result-t.zip", [], start="2022-01-01 00:00:00",
+         end="2024-08-28 00:00:00")
+    _zip(sandbox / "bt" / "backtest-result-v.zip", [], start="2024-08-28 00:00:00",
+         end="2026-09-01 00:00:00")
+    _report(sandbox, "S", "top2", "1", {("top2", "TEST"): "backtest-result-t.zip",
+                                         ("top2", "VAL"): "backtest-result-v.zip"}, sidecar=True)
+    lo, hi = rl.leg_window("S", "top2", "VAL")
+    assert lo == pd.Timestamp("2024-08-28", tz="UTC") and hi == pd.Timestamp("2026-09-01", tz="UTC")
+
+
+def test_iter_results_walks_all_strategies(sandbox):
+    # bt_summary 需列出 zip 内全部策略；read_result 只取首个
+    body = {"strategy": {"A": {"trades": [], "profit_total_abs": 1},
+                         "B": {"trades": [{"pair": "X"}], "profit_total_abs": 2}},
+            "timerange": "2022-2024"}
+    p = sandbox / "bt" / "backtest-result-multi.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("multi.json", json.dumps(body))
+    names = [n for n, _, _, _ in rl.iter_results(p)]
+    assert names == ["A", "B"]
+    assert rl.read_result(p)[0]["profit_total_abs"] == 1
+    assert next(iter(rl.iter_results(p)))[3]["timerange"] == "2022-2024"
+
+
+def test_enable_utf8_console_never_raises(sandbox):
+    rl.enable_utf8_console()  # 在 pytest 捕获的流上 reconfigure 可能失败，不得抛出
+
+
+def test_gbk_console_cannot_print_gate_marks():
+    """回归锁：Windows cp936 下 ✅/❌ 会 UnicodeEncodeError，被 redirect 时更会被吞成 0 字符。
+
+    这就是 tier_b_eval / portfolio_4arm 未设 PYTHONIOENCODING 时 exit 1 的原因；
+    修法是 main() 先调 research_lib.enable_utf8_console()，而不是在文档里要求设环境变量。
+    """
+    import io
+    with pytest.raises(UnicodeEncodeError):
+        io.TextIOWrapper(io.BytesIO(), encoding="gbk").write("门禁 ✅")
+    # 反证：utf-8 编码器可写（enable_utf8_console 就是让标准流换成它）
+    buf = io.BytesIO()
+    w = io.TextIOWrapper(buf, encoding="utf-8")
+    w.write("门禁 ✅")
+    w.flush()
+    assert "✅" in buf.getvalue().decode("utf-8")

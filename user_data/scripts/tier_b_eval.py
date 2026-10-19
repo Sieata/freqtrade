@@ -31,30 +31,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    STAKE, find_validation, load_arm, monthly_series, pool_wallet, read_result, sharpe_m, split_ts,
+    STAKE, concentration, enable_utf8_console, find_validation, leg_window, load_arm,
+    monthly_series, pool_wallet, read_result, sharpe_m, split_ts, trade_pf,
 )
 
 BASE = "WeekendReverseV2"
 ARMS = ["FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
 G2_MAX_DD, G3_TOP, G3_YEAR, G4_MAX, G6_MAX, G7_NEG_MAX, G7_DEPTH = 0.30, 0.50, 0.80, 30.0, 1.5, 1, -150.0
-
-
-def leg_window(strategy, pool, seg):
-    """该策略验证腿的实际回测窗口 (start, end)。"""
-    stats, _ = read_result(find_validation(strategy, pool)[seg]["zip"])
-    return pd.Timestamp(stats["backtest_start"], tz="UTC"), pd.Timestamp(stats["backtest_end"], tz="UTC")
-
-
-def concentration(df):
-    """(最大品种, 其利润占比, 其最好一年占该品种利润比)；总利润 ≤ 0 时返回 None。"""
-    tot = df["profit$"].sum()
-    if tot <= 0 or df.empty:
-        return None
-    by_pair = df.groupby("pair_base")["profit$"].sum()
-    top = by_pair.idxmax()
-    t = df[df["pair_base"] == top]
-    yr = t.groupby(t["close_dt"].dt.year)["profit$"].sum()
-    return top, by_pair[top] / tot, (yr.max() / by_pair[top]) if by_pair[top] > 0 else 0.0
 
 
 def summarize(df, years, wallet):
@@ -97,14 +80,14 @@ def eval_arm(arm, base_df, pool, windows, wallet):
             "rho": rho, "sr_a": sr_a, "sr_v": sr_v, "sr_c": sr_c,
             "g5b": sr_a - rho * sr_v,
             "profit": a["profit$"].sum(),
-            "pf": (a.loc[a["profit$"] > 0, "profit$"].sum() / -a.loc[a["profit$"] < 0, "profit$"].sum()
-                   if (a["profit$"] < 0).any() else float("inf")),
+            "pf": trade_pf(a["profit$"]),
             "conc": concentration(a),
         }
     return out
 
 
 def main():
+    enable_utf8_console()
     ap = argparse.ArgumentParser(description="Tier B 事件臂增量门禁")
     ap.add_argument("--arms", default="", help="逗号分隔臂列表，默认 " + ",".join(ARMS))
     ap.add_argument("--arm", default=None, help="单臂（兼容旧用法）")

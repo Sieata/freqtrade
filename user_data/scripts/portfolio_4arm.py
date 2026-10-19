@@ -27,6 +27,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
+    enable_utf8_console,
+    leg_window,
     load_arm,
     max_dd,
     monthly_series,
@@ -34,7 +36,6 @@ from research_lib import (  # noqa: E402
     sharpe_m,
     split_ts,
 )
-from tier_b_eval import leg_window  # noqa: E402
 
 
 ARMS = ["WeekendReverseV2", "FundingSqueezeV1L", "OIFlushV2", "BigMoveV1"]
@@ -152,6 +153,7 @@ def weight_oos(m_test, m_val, y_test, y_val):
 
 
 def main():
+    enable_utf8_console()
     ap = argparse.ArgumentParser(description="四臂组合回测（sleeve 模型）")
     ap.add_argument("--pool", default="top10",
                     choices=["top2", "top5", "top10", "core", "volume"])

@@ -26,6 +26,21 @@ REPORT_DIR = USER_DATA / "reports"
 STAKE = 1000.0
 
 
+def enable_utf8_console():
+    """把 stdout/stderr 切到 UTF-8。
+
+    Windows 控制台默认 cp936：门禁脚本打印 ✅/❌ 会直接 UnicodeEncodeError 崩掉
+    （tier_b_eval / portfolio_4arm 实测），不是"显示乱码"而是中途异常退出、判定丢失。
+    只影响本进程输出，不改变文件读写（文件本来就用显式 encoding="utf-8"）。
+    """
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # 被重定向到不支持 reconfigure 的对象时忽略
+            pass
+
+
 # ---------------------------------------------------------------- 时间切分
 def load_splits():
     return json.loads((UNIVERSE / "splits.json").read_text(encoding="utf-8"))
@@ -69,23 +84,39 @@ def pool_wallet(name):
 
 
 # ---------------------------------------------------------------- 回测结果
-def read_result(zip_path):
-    """读回测 zip → (stats dict, trades list)。
-
-    路径解析：绝对路径 / 相对当前目录存在的路径原样用；否则按裸文件名在 BT_DIR 下找。
-    """
+def _resolve_zip(zip_path):
     zip_path = Path(zip_path)
     if not zip_path.is_absolute() and not zip_path.exists():
         zip_path = BT_DIR / zip_path.name
-    with zipfile.ZipFile(zip_path) as z:
+    return zip_path
+
+
+def iter_results(zip_path):
+    """逐个策略产出 (策略名, stats, trades, 顶层 meta)。
+
+    一个 zip 通常只含一个策略；bt_summary 需遍历全部策略，其余脚本用 read_result 取首个。
+    """
+    p = _resolve_zip(zip_path)
+    with zipfile.ZipFile(p) as z:
         for n in z.namelist():
             if not n.endswith(".json"):
                 continue
             d = json.loads(z.read(n))
             if isinstance(d, dict) and "strategy" in d:
-                s = d["strategy"][next(iter(d["strategy"]))]
-                return s, s.get("trades", [])
-    raise SystemExit(f"{zip_path.name}: 无策略结果")
+                for name, s in d["strategy"].items():
+                    yield name, s, s.get("trades", []), d
+                return
+    raise SystemExit(f"{p.name}: 无策略结果")
+
+
+def read_result(zip_path):
+    """读回测 zip → (stats dict, trades list)（取 zip 内首个策略）。
+
+    路径解析：绝对路径 / 相对当前目录存在的路径原样用；否则按裸文件名在 BT_DIR 下找。
+    """
+    for _, s, trades, _ in iter_results(zip_path):
+        return s, trades
+    raise SystemExit(f"{_resolve_zip(zip_path).name}: 无策略结果")
 
 
 def result_span_years(stats):
@@ -249,6 +280,46 @@ def max_dd(m):
     return float(min((eq - eq.cummax()).min(), 0.0))
 
 
+# ---------------------------------------------------------------- 逐笔汇总
+def trade_pf(p, inf_if_no_loss=True):
+    """利润因子 = 毛利 ÷ 毛亏。p 为逐笔 $ 序列。
+
+    空序列返回 0.0（没有交易 ≠ 无亏损的完美策略）。
+    无亏损笔时返回 inf（inf_if_no_loss=True）——报告里写作 ∞，与 freqtrade 一致。
+    """
+    if len(p) == 0:
+        return 0.0
+    gw = p[p > 0].sum()
+    gl = -p[p < 0].sum()
+    if gl > 0:
+        return float(gw / gl)
+    return float("inf") if inf_if_no_loss else 0.0
+
+
+def concentration(df, denom="profit"):
+    """集中度三件套：(最大品种, 其利润占比, 其利润最好一年占该品种利润比)。
+
+    df 需含 pair_base / close_dt / profit$。总利润 ≤ 0 时返回 None
+    （占比无意义，调用方按"无利润"处理，不要拿负数分母硬算）。
+    """
+    tot = df["profit$"].sum()
+    if df.empty or tot <= 0:
+        return None
+    by_pair = df.groupby("pair_base")["profit$"].sum()
+    top = by_pair.idxmax()
+    t = df[df["pair_base"] == top]
+    yr = t.groupby(t["close_dt"].dt.year)["profit$"].sum()
+    return top, float(by_pair[top] / tot), float((yr.max() / by_pair[top]) if by_pair[top] > 0 else 0.0)
+
+
+def yearly_pnl(df, wallet=None):
+    """按平仓年汇总利润：{year(str): $}；给 wallet 时另给 {year: %}，每年重置钱包口径。"""
+    yr = df.groupby(df["close_dt"].dt.year)["profit$"].sum()
+    if wallet is None:
+        return {str(k): float(v) for k, v in yr.items()}
+    return {str(k): (float(v), float(v / wallet)) for k, v in yr.items()}
+
+
 # ---------------------------------------------------------------- 验证报告定位
 def _legs_from_sidecar(path):
     d = json.loads(path.read_text(encoding="utf-8"))
@@ -315,3 +386,13 @@ def leg_span_years(strategy, pool):
     """该验证记录两腿各自的回测覆盖年数 {TEST: y, VAL: y}（年化分母，替代硬编码 2.657/2.002）。"""
     v = find_validation(strategy, pool)
     return {seg: result_span_years(read_result(v[seg]["zip"])[0]) for seg in ("TEST", "VAL")}
+
+
+def leg_window(strategy, pool, seg):
+    """该策略验证腿的实际回测窗口 (start, end)，UTC。
+
+    组合脚本拿它求"各臂共同窗口"——VAL 右端开放、各臂验证日期不同，
+    不截齐就会拿不同长度的段算年化/相关，增量 pp 不可比。
+    """
+    stats, _ = read_result(find_validation(strategy, pool)[seg]["zip"])
+    return pd.Timestamp(stats["backtest_start"], tz="UTC"), pd.Timestamp(stats["backtest_end"], tz="UTC")

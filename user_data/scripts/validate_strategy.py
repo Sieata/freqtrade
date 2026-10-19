@@ -40,8 +40,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, load_pool, load_splits,
-    read_result, result_span_years, run_backtest,
+    REPORT_DIR, ROOT, STAKE, STRATEGIES, UNIVERSE, enable_utf8_console, load_pool, load_splits,
+    read_result, result_span_years, run_backtest, trade_pf,
 )
 
 VAL_LEDGER = UNIVERSE / "val_ledger.jsonl"
@@ -110,7 +110,7 @@ def analyze(stats, trades, max_open_trades=1):
         "trades": stats.get("total_trades", len(trades)),
         "profit_abs": stats.get("profit_total_abs", 0.0),
         "win_rate": stats.get("winrate", 0.0),
-        "pf": pf if pf else (float("inf") if stats.get("profit_total_abs", 0) > 0 else 0.0),
+        "pf": pf if pf else trade_pf(pd.Series([t["profit_ratio"] * STAKE for t in trades])),
         "dd": dd,
         "dd_acct": dd_acct,
         "dd_slots": dd_slots,
@@ -219,6 +219,7 @@ def fmt_table(pairs, years, cell, cnt, wins, wallet):
 
 
 def main():
+    enable_utf8_console()
     ap = argparse.ArgumentParser(description="规范化策略验证（TEST/VAL × core/volume）")
     ap.add_argument("--strategy", required=True)
     ap.add_argument("--pool", choices=["top2", "top5", "top10", "core", "volume", "both"], default="both")

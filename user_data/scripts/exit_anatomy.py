@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from research_lib import ROOT, STAKE, read_result  # noqa: E402
+from research_lib import ROOT, STAKE, read_result, trade_pf  # noqa: E402
 
 CAND_DIR = ROOT / "user_data" / "data" / "binance" / "futures"
 
@@ -139,7 +139,7 @@ def main() -> None:
     nw, nl = len(win), len(losers)
     gw, gl = sum(t["pnl"] for t in win), -gross_loss
     if nw and nl and gw > 0 and gl > 0:
-        pf = gw / gl
+        pf = trade_pf(pd.Series([t["pnl"] for t in tr]))
         W, L = gw / nw, gl / nl
         be = L / (L + W)
         w = nw / n
