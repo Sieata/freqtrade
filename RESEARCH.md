@@ -13,28 +13,39 @@
 
 | 策略 | 角色 | 证据 | 下一步 |
 |---|---|---|---|
-| **WeekendReverseV2** | 引擎 | 唯一 TEST/VAL 双段显著（p < 1e-5，月聚类 CI 不含 0）；钱包年化 TEST +19.1% / VAL +16.1% | paper 中（冻结 2026-08-16，FREEZE_V2 判据：≥20 笔、胜率 ≥70%、回撤 ≤30%、利润 >0） |
-| **OIFlushV2** | 唯一合格事件臂 | Tier B 门禁 1–7 全过；V2+OI 过配比纪律（VAL Calmar 4.84 vs 仅 V2 3.85） | 12 月初 OI 历史满 60 天 → paper 包；配比 0.5–1.0×V2 |
+| **WeekendReverseV2** | 引擎 | 唯一 TEST/VAL 双段显著（p < 1e-5，月聚类 CI 不含 0）；钱包年化 TEST +19.1% / VAL +15.6% | **paper 未运行**（2026-10-19 确认无设备，见 26.10）；冻结未改，启动包就绪 |
+| **OIFlushV2** | 唯一合格事件臂 | Tier B 门禁 1–7 全过；V2+OI 过配比纪律（VAL Calmar 4.72 vs 仅 V2 3.74） | **paper 未运行**；OI 累积器已补到 10-19（07-29 起 437 点） |
 
 FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–79% 来自单一中盘币），
-paper 跑完 FREEZE 评审即止，不再研究。其余策略在 `user_data/strategies/archive/`（附归档原因）。
+不再研究；paper 亦未运行。其余策略在 `user_data/strategies/archive/`（附归档原因）。
+
+> ⚠️ **2026-10-19 状态更正**：此前文档多处写"paper 进行中"，实际**从未有 paper 设备**。
+> 三个 dry-run db 无一有交易：V2 的 `tradesv3.dryrun.sqlite` 是 0 字节空文件（无表）；
+> FS 的 `fs_live_test_dryrun.sqlite` 建于 08-29 但 0 笔交易 / 0 笔订单；
+> BigMove / H8c 模拟器 db 或无或 0 行。**"paper 已跑 2 个月"是错误认知**，详见 26.10。
 
 **待决（按重要性）**
 
-1. **V2 的 paper 配置 ≠ 评估配置。** paper（冻结）= 8 品种（含 BANK/CYS 小币）、满仓复利、
+1. **paper 从未运行 —— 这是当前最大的缺口（2026-10-19 确认）。** 用户无 paper 设备，
+   三个 dry-run db 全部零交易（逐个体检见 26.10）。RESEARCH/FREEZE 里"paper 进行中"的
+   表述作废，包括第九节"（已启动）"、26.4/26.5 的"FS/BigMove 维持 paper 观察"。
+   需要先决定：本机长期开机跑 paper，还是接受"无 forward-test 直接小仓上实盘"。
+2. **V2 的 paper 配置 ≠ 评估配置。** paper（冻结）= 8 品种（含 BANK/CYS 小币）、满仓复利、
    max_open_trades=1；所有门禁/显著性/组合分析 = TOP10、每笔固定 $1,000、并发至多 10。
-   paper 通过只证明前者。上实盘前须定：按哪套配置上；若按 TOP10 固定仓位，需要一段对应的
-   paper（或至少 signal_recon 对账证明信号一致）。**不改冻结中的 paper**。
+   上实盘前须定：按哪套配置上；若按 TOP10 固定仓位，需要一段对应的 paper（或至少
+   signal_recon 对账证明信号一致）。**不改冻结中的配置**。
    → 回测对比见 26.7：**建议按 TOP10 固定仓位上实盘**（复利 1 仓的高收益是杠杆化路径 + BANK/CYS
-   小币贡献，风险调整后无优势）；新 paper 实例待用户决定是否启动。
-2. OIFlushV2 paper 包（12 月初）：live 数据路径（OI 累积器）+ dry-run，与 V2 同口径。
-3. 实盘资金规模与仓位：sizing_sweep 结果 + V2+OI 合并回撤。
+   小币贡献，风险调整后无优势）。
+3. OIFlushV2 paper 包：OI 历史已补到 10-19（07-29 起，437 点 / 81 天）；但 09-07 有一次
+   224h（9 天）缺口，无法回补 → 累计**有效**历史约 72 天，距离 180d 分位窗仍远。
+4. 实盘资金规模与仓位：sizing_sweep 结果 + V2+OI 合并回撤。
 
-**日常**：每会话 `refresh_all.sh`；paper 周报 `paper_status.py`；月度 `signal_recon.py`；
-paper 设备 cron：OI 累积器（保留）、h8c_paper（**已收线，需手动删除**）、V1 实例（**已退役，需停**）。
+**日常**：每会话 `refresh_all.sh`；月度 `signal_recon.py`。
+**无 paper 设备**：cron 计划不存在，`paper_status.py` 无 db 可读。
+OI 累积器需人工定期跑（API 只留 30 天，漏跑即永久缺口）。
 
-**数据状态（2026-10-19）**：K 线/mark/funding 全部到 10-19（TOP10 含 TRX/XMR）。
-本机不是 paper 机，forward-test 运行态只能在 paper 设备确认。
+**数据状态（2026-10-19）**：K 线/mark/funding 全部到 10-19（TOP10 含 TRX/XMR）；
+OI 累积到 10-19。**本机没有 paper 设备，forward-test 实际未运行**，详见 26.10。
 
 **路径变更**：2026-10-07 起一次性研究脚本移入 `user_data/scripts/archive/`、退役策略移入
 `user_data/strategies/archive/`、V1/H8c 的 paper 文档移入 `user_data/paper/archive/`。
@@ -281,7 +292,7 @@ freqtrade backtesting --config user_data/config_bigmove.json \
 - BANK/CYS/HYPE 仅在上市后年份有交易（BANK 2025-2026 / CYS 仅 2026），每年都正但**无完整周期样本**——保留在池中，实盘解读时将其贡献视为不确定项。
 - 逐年独立合计：2022 +$1,246 / 2023 +$1,300 / 2024 +$856 / 2025 +$1,753 / 2026(至8月) +$1,695——BigMove 亏损的 2025 震荡年，本策略为最强年，互补性确认。
 
-### WeekendReverseV2 paper forward-test（已启动）
+### WeekendReverseV2 paper forward-test（~~已启动~~ **实际从未运行，见 26.10**）
 
 - 2026-08-28 启动：`config_paper_v2.json` + `paper_start.sh`（启动前校验策略 SHA = 冻结快照 `1b90c90b…46d1`）。
 - **只跑 V2 单策略**：V1/V2 仅差尾随步长 0.1%，双开会使样本量减半；V1 作为对照记录。
@@ -596,6 +607,9 @@ V2 的实际仓位设计是 `max_open_trades=1` + `stake_amount=unlimited` + `tr
 - 边际收益 3~5 槽后迅速衰减（5 槽 97% 利润 / 50% 资本）。**3 槽是统计质量与资本效率的折点。**
 
 #### 结论与建议（不改现行冻结，paper 继续跑）
+
+> ⚠️ 2026-10-19 勘误：标题的"paper 继续跑"不成立——paper 从未运行（见 26.10）。
+> 本节结论（并发槽位/仓位轴）是纯回测结论，不受影响。
 
 1. **唯一在统计质量上真正变好的改动是并发槽位**，且只动一个 config 字段、不碰策略逻辑。
 2. **仓位轴的正确用法是"降低单笔仓位 + 提高并发"，不是"满仓复利"**：
@@ -1554,6 +1568,8 @@ trailing 26 笔 +$2,155 / roi 1 笔 +$250。
 - 事件臂定位从"组合增量"改为"**额外资金的增量收益**"：只在 V2 资金已满配、
   有闲置额度时才加；不应以"降低组合风险"为由上线。
 - paper 证据（FS/BigMove 自 2026-08-29 起）是判断这三臂的主要依据，回测已无更多信息。
+  **⚠️ 2026-10-19 勘误：这三臂的 paper 从未运行（26.10），"paper 证据"不存在**；
+  本条判断改为"回测证据是唯一依据"。
 
 ### 26.5 门禁 v2 批准后的正式判定（2026-10-07）
 
@@ -1669,3 +1685,39 @@ V2 + OIFlushV2 两臂（唯一合格组合）全部 ✅：
 原因是 FS 与 BM 在 VAL 段月度相关 **0.65**（高度重叠），且 FS 自身未过 Tier B 门禁3
 （VAL 集中度 ZEC 82%）。这从组合层再次印证「合格组合只有 V2+OI」——四臂不上线，
 该观察不改变任何决策，仅作以后若重启 FS/BM 的参考。
+
+### 26.10 paper forward-test 状态勘误：从未运行（2026-10-19）
+
+**结论：本项目没有任何一次 paper forward-test 真正跑起来过。** 这不是"某个实例掉了"，
+而是自始就没有 paper 设备——本机（Win）db 全是空壳，`paper_start.sh` 从未成功跑过一轮。
+所有引用"paper 已跑 N 周/月"作证据的地方，证据强度应归零。
+
+**逐个体检（2026-10-19，本机）**：
+
+| 实例 | db | 体检结果 |
+|---|---|---|
+| WeekendReverseV2 | `user_data/tradesv3.dryrun.sqlite` | **0 字节，无任何表** —— 连 schema 都没建，`paper_start.sh` 没跑成 |
+| FundingSqueezeV1L | `user_data/fs_live_test_dryrun.sqlite` | 有表（trades/orders/wallet_history 齐），但 **0 笔交易 / 0 笔订单 / wallet_history 0 行**；KeyValueStore 的 `bot_start_time` = 2026-08-29 03:23，说明那天起过进程、之后没活过 |
+| BigMoveV1 | `config_paper_bigmove.json` 指向的 db | 文件不存在 |
+| H8c 模拟器（非 freqtrade） | `user_data/h8c_paper/state.sqlite` | 0 行 positions / 0 行 funding_log |
+
+`user_data/logs/` 无任何 paper 运行日志（只有回测/研究日志）；`oi_accumulate.log` 也不存在。
+
+**受影响的表述（全部作废）**：第九节"WeekendReverseV2 paper forward-test（已启动）"、
+第十一节"paper 包就绪"、26.4/26.5 的"paper 证据（FS/BigMove 自 2026-08-29 起）是判断
+这三臂的主要依据"、十七节"现行 paper 保持冻结不动"、二十二节"该 paper 尚未启动，是运气"
+（H8c 那条反而因祸得福）。AGENTS.md 里"V2（paper 中）、OIFlushV2（12 月初 paper）"、
+"paper forward-test（paper 设备）"同批作废。
+
+**不影响的部分**：全部回测结论（TEST/VAL、门禁、组合配比、26.8/26.9 的复核）与 paper 无关，
+原样有效。V2 策略 SHA 冻结也未受影响（没跑过就不会被改坏）。
+
+**前置条件的真实状态**：OIFlushV2 的"OI 历史满 60 天"这一条**至今未达成**。OI 累积器
+（`oi_accumulate.py`）实际只在 2026-07-29 之后留下数据：13 品种各 437 点、覆盖到 10-19，
+但 08-29 08:00 → 09-07 16:00 有 **9 天 8 小时（55 个 4h 点）缺口无法回补**（API 只留
+30 天），13 品种缺口完全一致 → 有效历史 = 492 − 55 = **437 点 ≈ 81 天跨度，其中连续无缺口
+段最长 72 天**。距 OIFlushV2 的 180d 分位窗仍远，且要靠人工定期跑累积器续命。
+
+**下一步（待用户决定，见顶部待决 1）**：① 本机长期开机跑 paper（Windows 睡眠/断网会
+制造假缺口，需先解决）；② 或接受无 forward-test 直接小仓上实盘。在决定前，
+V2/OIFlushV2 的回测证据是唯一依据。

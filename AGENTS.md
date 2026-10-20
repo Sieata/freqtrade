@@ -6,8 +6,10 @@
 ## 项目方向（2026-10-07 起：收缩，挖出可用策略）
 
 - **目标只有一个**：把 WeekendReverseV2（引擎）+ OIFlushV2（唯一过 Tier B 的臂）推到可实盘。
-- 在用策略 4 个：V2（paper 中）、OIFlushV2（12 月初 paper）、FundingSqueezeV1L / BigMoveV1
-  （paper 跑完各自 FREEZE 评审即止，不再投入研究）。其余在 `strategies/archive/`。
+- 在用策略 4 个：V2、OIFlushV2、FundingSqueezeV1L / BigMoveV1。其余在 `strategies/archive/`。
+  **⚠️ paper forward-test 从未运行**（2026-10-19 确认：三个 dry-run db 全零交易，
+  本机无 paper 设备，RESEARCH 26.10）。任何"paper 进行中 / 已跑 N 月"的表述都是错的；
+  V2/OI 的证据只有回测。启动 paper 前先读 RESEARCH 顶部待决 1。
 - **已收线，未经用户明确要求不得重启**：新策略族搜索、套利/市场中性（含 H8c 模拟器）、单品种 CTA、
   合成期权。对应脚本在 `user_data/scripts/archive/`（未迁移 research_lib，复用前先迁移）。
 - 不再扩建分析框架；工具层只做维护（bug 修复 + 单测）。
@@ -35,13 +37,14 @@
 ./refresh_all.sh                                                     # Windows 用 Git Bash 跑；PowerShell 用 .\ensure-data.ps1 [池文件]
 .venv/bin/python user_data/scripts/data_check.py --pools top10       # 退出码 1 = 有缺口/重复
 
-# paper forward-test（paper 设备）
+# paper forward-test（⚠️ 本机没有 paper 设备，从未跑过一轮 —— 以下命令未经确认无 db 可读）
 ./user_data/scripts/paper_start.sh          # V2（内置 SHA 校验，不匹配拒绝启动）
 ./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28）
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082，FREEZE_BIGMOVE）
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
-# OI 累积器 cron（OIFlush live 前置，漏跑无法回补）：
+# OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 无 cron 设备，需人工定期跑。
+#   现状 2026-10-19：13 品种 437 点至 10-19，08-29→09-07 有 9 天缺口无法回补）
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 
 # 验证链（STRATEGY_WORKFLOW 第〇节 + 4.3）
