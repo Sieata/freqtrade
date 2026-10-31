@@ -18,8 +18,15 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-# 计划任务环境无 shell 代理变量，脚本自带代理（FT_PROXY 可覆盖，none 直连）
-_proxy = os.environ.get("FT_PROXY", "http://127.0.0.1:7897")
+# 计划任务环境无 shell 代理变量：FT_PROXY 优先，否则自动探测 7897（不通则直连）
+_proxy = os.environ.get("FT_PROXY")
+if _proxy is None:
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", 7897), 0.3).close()
+        _proxy = "http://127.0.0.1:7897"
+    except OSError:
+        _proxy = "none"
 if _proxy != "none":
     os.environ.setdefault("https_proxy", _proxy)
     os.environ.setdefault("http_proxy", _proxy)

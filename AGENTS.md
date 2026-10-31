@@ -24,7 +24,9 @@
 
 ## 网络（国内网络，Clash 代理）
 
-- binance API 需代理：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`（shell 环境变量默认没有）。
+- binance API 国内一般需代理。`refresh_all.sh` 与 `oi_accumulate.py` 会自动探测 `127.0.0.1:7897`，
+  不通则直连（2026-10-31 本机即直连可用）；临时命令仍可手动
+  `export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`。
 - WAF 403 主要拦 funding 的老 startTime 查询：历史从 data.binance.vision 补（`user_data/scripts/import_funding_vision.py`，直连无需代理），近期增量走 API。批量拉取时 funding 端点会被整体临时封锁几分钟（连近期增量也 403），等几分钟小批量重试即可；vision 无 funding 每日包，个别月份 zip 缺件会留空洞（BNB 2025-11 先例），完整性检查看相邻间隔 >3 天。
 - GitHub SSH 22 直连正常，push 不需要代理。
 - 数据更新：`./ensure-data.sh`（增量；FT_PROXY 环境变量可覆盖代理）；跑完接 `data_check.py`
@@ -33,10 +35,12 @@
 ## 常用命令
 
 ```bash
-# 数据（每会话 / paper 设备 cron）：一条命令完成 K线/funding + OI + metrics + 接缝校验
+# 数据（每会话）：一条命令完成 K线/funding + OI + metrics + 接缝校验；默认只保鲜 TOP10
 ./refresh_all.sh                                                     # 自动探测代理（7897 可用则走代理，否则直连）；FT_PROXY 可覆盖
-.\refresh.ps1                                                        # Windows PowerShell 等价入口（内部调用 refresh_all.sh）
+./refresh_all.sh --pool core                                         # 换池：top10/top5/top2/core/volume（只作用于 K线与校验）
+.\refresh.ps1 [--pool core]                                          # Windows PowerShell 等价入口（内部调用 refresh_all.sh）
 .venv/bin/python user_data/scripts/data_check.py --pools top10       # 单独校验；退出码 1 = 有缺口/重复
+# ⚠️ core/volume 默认不保鲜（2026-10-31 实测：37 个 core 品种停在 09-21）；泛化测试前先 --pool core
 
 # paper forward-test（⚠️ 本机没有 paper 设备，从未跑过一轮 —— 以下命令未经确认无 db 可读）
 ./user_data/scripts/paper_start.sh          # V2（内置 SHA 校验，不匹配拒绝启动）
@@ -44,7 +48,8 @@
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082，FREEZE_BIGMOVE）
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
-# OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 无 cron 设备，需人工定期跑。
+# OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 本机无自动调度，需人工定期跑，
+#   建议每次会话跑一次 refresh_all.sh。代理由脚本自动探测（7897 不通则直连），FT_PROXY 可覆盖。
 #   现状 2026-10-31：13 品种 508 点至 10-31，08-29→09-07 有 9 天缺口无法回补）
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 

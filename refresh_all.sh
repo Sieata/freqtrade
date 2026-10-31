@@ -2,14 +2,42 @@
 # 数据保鲜一键入口：K线/funding 增量 + OI 累积 + metrics 月度增量 + 接缝校验
 #
 # 用法（一条命令，可安全重复运行，增量耗时约 1-3 分钟）：
-#   ./refresh_all.sh                                  # 自动探测本地代理，探测不到则直连
+#   ./refresh_all.sh                                  # 默认 TOP10 池，自动探测本地代理
+#   ./refresh_all.sh --pool core                      # 换池：top10 / top5 / top2 / core / volume
 #   FT_PROXY=http://127.0.0.1:7897 ./refresh_all.sh   # 显式指定代理
 #   FT_PROXY=none ./refresh_all.sh                    # 强制直连
 #
-# Windows PowerShell 等价入口：.\refresh.ps1
+# 说明：
+#   - --pool 只作用于 [1/4] K线/funding 与 [4/4] 接缝校验（校验按该池）；
+#   - [2/4] OI 累积器固定按自己的默认 13 品种；[3/4] metrics 固定 TOP10
+#     （core/volume 全量补 metrics 要拉数千个日包，评估用不到，故不随池变化）；
+#   - 非 TOP10 池的接缝校验带 --no-metrics，只看 K线，避免 metrics 滞后误报。
+#
+# Windows PowerShell 等价入口：.\refresh.ps1 [--pool core]
 # 校验规则见 user_data/scripts/data_check.py；数据分发方式见 user_data/data/README.md。
 
 set -uo pipefail
+
+# ── 参数 ────────────────────────────────────────────────────────────────
+POOL="top10"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pool)   POOL="${2:-}"; shift 2 || shift ;;
+        --pool=*) POOL="${1#*=}"; shift ;;
+        -h|--help)
+            echo "用法: $0 [--pool top10|top5|top2|core|volume]"
+            echo "  --pool  要保鲜的币池（默认 top10），对应 user_data/universe/pairs_<pool>.txt"
+            exit 0 ;;
+        *) echo "[!] 未知参数: $1（用 --help 查看）" >&2; exit 2 ;;
+    esac
+done
+
+POOL_FILE="user_data/universe/pairs_${POOL}.txt"
+if [ -z "$POOL" ] || [ ! -f "$POOL_FILE" ]; then
+    echo "[!] 池文件不存在: $POOL_FILE" >&2
+    echo "    可用池: $(ls user_data/universe/pairs_*.txt 2>/dev/null | sed 's|.*pairs_||;s|\.txt||' | tr '\n' ' ')" >&2
+    exit 2
+fi
 
 # 纯 bash 定位脚本目录（不依赖 dirname，受限 shell 也可运行；2026-09-21 加固）
 SELF="${BASH_SOURCE[0]}"
@@ -41,38 +69,42 @@ export PYTHONIOENCODING=utf-8
 cd "$ROOT"
 FAIL=0
 
-echo "── [1/4] K线/funding 增量（TOP10 池）──"
-./ensure-data.sh user_data/universe/pairs_top10.txt || { echo "[!] ensure-data 失败（继续其他步骤）" >&2; FAIL=1; }
+echo "池: $POOL（$POOL_FILE）"
+echo
+echo "── [1/4] K线/funding 增量（$POOL）──"
+./ensure-data.sh "$POOL_FILE" || { echo "[!] ensure-data 失败（继续其他步骤）" >&2; FAIL=1; }
 
 echo
-echo "── [2/4] OI 累积器（OIFlush live 前置，漏跑不可回补）──"
+echo "── [2/4] OI 累积器（OIFlush live 前置，漏跑不可回补；固定 13 品种）──"
 "$PY" user_data/scripts/oi_accumulate.py || { echo "[!] oi_accumulate 失败" >&2; FAIL=1; }
 
 echo
-echo "── [3/4] metrics 月度增量（TOP10 品种）──"
+echo "── [3/4] metrics 月度增量（固定 TOP10 品种）──"
 "$PY" user_data/scripts/import_metrics_vision.py BTC ETH BNB XRP SOL TRX HYPE ZEC DOGE XMR \
     | "$PY" -c "import sys; ls = sys.stdin.readlines(); print(''.join(ls[-10:]), end='')" \
     || { echo "[!] metrics 导入失败" >&2; FAIL=1; }
 
 echo
-echo "── [4/4] 接缝校验 + 最新数据日期 ──"
-if ! "$PY" user_data/scripts/data_check.py --pools top10; then
+echo "── [4/4] 接缝校验 + 最新数据日期（$POOL）──"
+CHECK_ARGS=(--pools "$POOL")
+[ "$POOL" = "top10" ] || CHECK_ARGS+=(--no-metrics)
+if ! "$PY" user_data/scripts/data_check.py "${CHECK_ARGS[@]}"; then
     echo "[!] data_check 报出缺口/重复（见上方输出）" >&2
     FAIL=1
 fi
 
-"$PY" - <<'PYEOF'
+"$PY" - "$POOL_FILE" <<'PYEOF'
+import sys
 import warnings
 warnings.filterwarnings("ignore")
 from datetime import datetime, timezone
 
 import pyarrow.feather as f
 
-pairs = []
-for line in open("user_data/universe/pairs_top10.txt", encoding="utf-8"):
-    line = line.split("#")[0].strip()
-    if line:
-        pairs.append(line)
+pool_file = sys.argv[1]
+pairs = [line.split("#")[0].strip()
+         for line in open(pool_file, encoding="utf-8")
+         if line.split("#")[0].strip()]
 
 now = datetime.now(timezone.utc)
 print(f"\n{'pair':<16s} {'最新 4h K 线 (UTC)':<20s} {'落后':>7s}")
