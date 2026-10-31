@@ -33,9 +33,10 @@
 ## 常用命令
 
 ```bash
-# 数据（每会话 / paper 设备 cron）：K线/funding 增量 + OI 累积 + metrics，跑完校验接缝
-./refresh_all.sh                                                     # Windows 用 Git Bash 跑；PowerShell 用 .\ensure-data.ps1 [池文件]
-.venv/bin/python user_data/scripts/data_check.py --pools top10       # 退出码 1 = 有缺口/重复
+# 数据（每会话 / paper 设备 cron）：一条命令完成 K线/funding + OI + metrics + 接缝校验
+./refresh_all.sh                                                     # 自动探测代理（7897 可用则走代理，否则直连）；FT_PROXY 可覆盖
+.\refresh.ps1                                                        # Windows PowerShell 等价入口（内部调用 refresh_all.sh）
+.venv/bin/python user_data/scripts/data_check.py --pools top10       # 单独校验；退出码 1 = 有缺口/重复
 
 # paper forward-test（⚠️ 本机没有 paper 设备，从未跑过一轮 —— 以下命令未经确认无 db 可读）
 ./user_data/scripts/paper_start.sh          # V2（内置 SHA 校验，不匹配拒绝启动）
@@ -44,7 +45,7 @@
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
 # OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 无 cron 设备，需人工定期跑。
-#   现状 2026-10-20：13 品种 442 点至 10-20，08-29→09-07 有 9 天缺口无法回补）
+#   现状 2026-10-31：13 品种 508 点至 10-31，08-29→09-07 有 9 天缺口无法回补）
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 
 # 验证链（STRATEGY_WORKFLOW 第〇节 + 4.3）
