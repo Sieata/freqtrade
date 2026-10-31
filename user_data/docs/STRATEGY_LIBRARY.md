@@ -1,15 +1,15 @@
 # 策略库总览（测量结果整理）
 
-> 整理日期：2026-08-16
-> 数据来源：`user_data/backtest_results`（644 次回测 zip + meta）、`user_data/strategies/` 源码、`RESEARCH.md`、`STRATEGY_WORKFLOW.md`
-> 全量明细：`user_data/backtest_results/_all_runs_summary.csv`（644 行，含每次回测的策略/周期/笔数/胜率/利润/回撤/夏普等）
+> 整理日期：2026-08-16（2026-10-31 核对：回测数量与 paper 状态已更正）
+> 数据来源：`user_data/backtest_results`（647 次回测 zip + meta）、`user_data/strategies/` 源码、`RESEARCH.md`、`STRATEGY_WORKFLOW.md`
+> 全量明细：`user_data/backtest_results/_all_runs_summary.csv`（644 行，含每次回测的策略/周期/笔数/胜率/利润/回撤/夏普等；08-16 之后新增的 3 次未回填）
 
 ---
 
 ## 一、当前策略库（权威状态）
 
 **现势状态以 `RESEARCH.md` 顶部「当前状态」为唯一权威**（2026-10-07 项目收缩后）。当前构成：
-V2 引擎（paper 中）+ OIFlushV2（唯一过 Tier B，12 月初 paper）+ FS/BigMove（paper 跑完评审即止）；
+V2 引擎 + OIFlushV2（唯一过 Tier B）+ FS/BigMove（Tier B 未过，不再研究）。**paper 从未运行**（2026-10-19 确认，见 RESEARCH 26.10），全部证据只有回测；
 其余归档于 `user_data/strategies/archive/`（附归档原因）。旧快照 STATUS_20260829 已移入 `docs/archive/`。
 下表为 2026-08-16 的历史快照，**数字已过时勿引用**：
 
@@ -43,11 +43,12 @@ V2 引擎（paper 中）+ OIFlushV2（唯一过 Tier B，12 月初 paper）+ FS/
 
 ## 四、测量库概况
 
-- 回测总数：644 次（zip + meta 成对保存）
+- 回测总数：647 次（zip + meta 成对保存）
   - 2026-08-04：361 次（EmaDev / ShortTrend / DOGE / ETHShort 等早期扫描）
   - 2026-08-05：136 次（NightCrash / Weekend 系列 / CrashBuy）
   - 2026-08-13：147 次（WeekendReverseV1 集中验证 + 2 份 HTML 报告）
-- 策略数量：39 个曾在回测中出现（源码现存 4 个正式 + sample）
+  - 2026-08-16：3 次（WeekendReverseV2 定版 + 2 次 `_dev` 快速验证）
+- 策略数量：39 个曾在回测中出现（源码现存 5 个在用 + 归档目录）
 - 汇总表：`user_data/backtest_results/_all_runs_summary.csv`
 
 ---

@@ -44,7 +44,7 @@
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
 # OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 无 cron 设备，需人工定期跑。
-#   现状 2026-10-19：13 品种 437 点至 10-19，08-29→09-07 有 9 天缺口无法回补）
+#   现状 2026-10-20：13 品种 442 点至 10-20，08-29→09-07 有 9 天缺口无法回补）
 # 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
 
 # 验证链（STRATEGY_WORKFLOW 第〇节 + 4.3）
@@ -120,8 +120,8 @@
 ## 禁改 / 高危
 
 - **`user_data/strategies/WeekendReverseV2.py` 不可改动**（V1 已于 2026-10-07 退役归档）：SHA 已冻结，
-  paper forward-test 进行中，改动 = 测试作废（paper/FREEZE_V2.md）。改参数做实验用副本或策略参数文件。
-- forward-test 期间只记录不改参数；判据与周期见 `user_data/paper/FREEZE_V2.md`。
+  改动 = 冻结指纹失效，须重走 VAL 并记入 VAL 窥视台账（paper/FREEZE_V2.md）。改参数做实验用副本或策略参数文件。
+- paper 尚未启动（见上节）；启动后 forward-test 期间只记录不改参数，判据见 `user_data/paper/FREEZE_V2.md`。
 
 ## Git 提交纪律（用户已明确授权，2026-08-28）
 

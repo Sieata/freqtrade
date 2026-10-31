@@ -14,5 +14,6 @@ STRATEGY_WORKFLOW 全流程（VAL 窥视台账按策略名记录，改名不豁�
 | WeekendReverseV2Lab | V2 实验副本 | RESEARCH |
 | sample_strategy | freqtrade 示例 | — |
 
-仍在用的 4 个（上一级目录）：WeekendReverseV2（引擎，paper 中）、OIFlushV2（唯一过 Tier B 的臂，
-12 月初 paper）、FundingSqueezeV1L / BigMoveV1（paper 跑完各自 FREEZE 评审，不再研究；Tier B 未过）。
+仍在用的 4 个（上一级目录）：WeekendReverseV2（引擎）、OIFlushV2（唯一过 Tier B 的臂）、
+FundingSqueezeV1L / BigMoveV1（Tier B 未过，不再研究）。**paper 从未运行**（2026-10-19 确认，
+见 RESEARCH 26.10），各自 FREEZE 文档只作冻结记录。
