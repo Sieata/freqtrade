@@ -1,12 +1,38 @@
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, Field, RootModel, SerializeAsAny, model_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    Field,
+    RootModel,
+    SerializeAsAny,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from freqtrade.constants import DL_DATA_TIMEFRAMES, IntOrInf
 from freqtrade.enums import MarginMode, OrderTypeValues, SignalDirection, TradingMode
 from freqtrade.ft_types import AnnotationType, ValidExchangesType
 from freqtrade.rpc.api_server.webserver_bgwork import JOB_CATEGORIES, ProgressTask
+
+
+def _no_base64_strategy(value: str) -> str:
+    """
+    Reject `StrategyName:base64` strategy names.
+    This is a security measure to prevent potential attacks using base64 encoded strategies.
+    Embedding a strategy as base64 is a config-file convenience
+    (see docs/strategy-advanced.md) - an API caller must never be able to supply one.
+    """
+    if ":" in value:
+        raise PydanticCustomError("strategy_name", "base64 encoded strategies are not allowed.")
+    return value
+
+
+# A strategy name as accepted from an API caller. Every request parameter or payload
+# field carrying a strategy name must use this instead of a plain `str`.
+StrategyName = Annotated[str, AfterValidator(_no_base64_strategy)]
 
 
 class ExchangeModePayloadMixin(BaseModel):
@@ -237,6 +263,7 @@ class ShowConfig(BaseModel):
     margin_mode: str
     short_allowed: bool
     stake_currency: str
+    proxy_coin: str | None = None
     stake_amount: str
     available_capital: float | None = None
     stake_currency_decimals: int
@@ -528,45 +555,75 @@ class FreqAIModelListResponse(BaseModel):
     freqaimodels: list[str]
 
 
-class __StrategyParameter(BaseModel):
-    param_type: str
+class __StrategyParameterInput(BaseModel):
     name: str
     space: str
+
+
+class IntParameterInput(__StrategyParameterInput):
+    param_type: Literal["IntParameter"]
+    value: int
+
+
+class RealParameterInput(__StrategyParameterInput):
+    param_type: Literal["RealParameter"]
+    value: float
+
+
+class DecimalParameterInput(__StrategyParameterInput):
+    param_type: Literal["DecimalParameter"]
+    value: float
+
+
+class BooleanParameterInput(__StrategyParameterInput):
+    param_type: Literal["BooleanParameter"]
+    value: bool
+
+
+class CategoricalParameterInput(__StrategyParameterInput):
+    param_type: Literal["CategoricalParameter"]
+    value: Any
+
+
+StrategyParameterInput = Annotated[
+    BooleanParameterInput
+    | CategoricalParameterInput
+    | DecimalParameterInput
+    | IntParameterInput
+    | RealParameterInput,
+    Field(discriminator="param_type"),
+]
+
+
+class __StrategyParameter(BaseModel):
     load: bool
     optimize: bool
 
 
-class IntParameter(__StrategyParameter):
-    param_type: Literal["IntParameter"]
-    value: int
+class IntParameter(IntParameterInput, __StrategyParameter):
     low: int
     high: int
 
 
-class RealParameter(__StrategyParameter):
-    param_type: Literal["RealParameter"]
-    value: float
+class RealParameter(RealParameterInput, __StrategyParameter):
     low: float
     high: float
 
 
-class DecimalParameter(__StrategyParameter):
-    param_type: Literal["DecimalParameter"]
-    value: float
+class DecimalParameter(DecimalParameterInput, __StrategyParameter):
     low: float
     high: float
     decimals: int
 
 
-class BooleanParameter(__StrategyParameter):
+class BooleanParameter(__StrategyParameterInput, __StrategyParameter):
     param_type: Literal["BooleanParameter"]
+    # Parameters without a default have no value
     value: bool | None
     opt_range: list[bool]
 
 
-class CategoricalParameter(__StrategyParameter):
-    param_type: Literal["CategoricalParameter"]
-    value: Any
+class CategoricalParameter(CategoricalParameterInput, __StrategyParameter):
     opt_range: list[Any]
 
 
@@ -598,9 +655,10 @@ class PairCandlesRequest(BaseModel):
 
 class PairHistoryRequest(PairCandlesRequest, ExchangeModePayloadMixin):
     timerange: str
-    strategy: str | None = None
+    strategy: StrategyName | None = None
     freqaimodel: str | None = None
     live_mode: bool = False
+    strategy_params: list[StrategyParameterInput] | None = None
 
 
 class PairHistory(BaseModel):
@@ -632,7 +690,7 @@ class BacktestFreqAIInputs(BaseModel):
 
 
 class BacktestRequest(BaseModel):
-    strategy: str
+    strategy: StrategyName
     timeframe: str | None = None
     timeframe_detail: str | None = None
     timerange: str | None = None
@@ -643,6 +701,7 @@ class BacktestRequest(BaseModel):
     backtest_cache: str | None = None
     freqaimodel: str | None = None
     freqai: BacktestFreqAIInputs | None = None
+    strategy_params: list[StrategyParameterInput] | None = None
 
 
 class BacktestResponse(BaseModel):
@@ -670,7 +729,7 @@ class BacktestHistoryEntry(BaseModel):
 
 
 class BacktestMetadataUpdate(BaseModel):
-    strategy: str
+    strategy: StrategyName
     notes: str = ""
 
 
@@ -680,8 +739,15 @@ class BacktestMarketChange(BaseModel):
     data: list[list[Any]]
 
 
+class BacktestPairHistoryRequest(BaseModel):
+    pair: str
+    columns: list[str] | None = None
+    # Defaults to the timerange the backtest ran on
+    timerange: str | None = None
+
+
 class LookaheadAnalysisRequest(BaseModel):
-    strategy: str
+    strategy: StrategyName
     timeframe: str | None = None
     timerange: str | None = None
     minimum_trade_amount: int = 10
@@ -706,7 +772,7 @@ class LookaheadAnalysisResponse(BaseModel):
 
 
 class RecursiveAnalysisRequest(BaseModel):
-    strategy: str
+    strategy: StrategyName
     timeframe: str | None = None
     timerange: str | None = None
     startup_candle: list[int] | None = None

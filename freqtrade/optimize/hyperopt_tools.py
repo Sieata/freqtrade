@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import numpy as np
 import rapidjson
@@ -61,10 +61,19 @@ class HyperoptTools:
         return None
 
     @staticmethod
+    def serialize_params(params: dict[str, Any], file_obj: TextIO) -> None:
+        """Serialize parameters to provided file object"""
+        rapidjson.dump(
+            params,
+            file_obj,
+            indent=2,
+            default=hyperopt_serializer,
+            number_mode=HYPER_PARAMS_FILE_FORMAT,
+        )
+
+    @staticmethod
     def export_params(params: dict[str, Any], strategy_name: str, filename: Path) -> None:
-        """
-        Generate files
-        """
+        """Generate files"""
         final_params = deepcopy(params["params_not_optimized"])
         final_params = deep_merge_dicts(params["params_details"], final_params)
         final_params = {
@@ -75,22 +84,21 @@ class HyperoptTools:
         }
         logger.info(f"Dumping parameters to {filename}")
         with filename.open("w") as f:
-            rapidjson.dump(
-                final_params,
-                f,
-                indent=2,
-                default=hyperopt_serializer,
-                number_mode=HYPER_PARAMS_FILE_FORMAT,
-            )
+            HyperoptTools.serialize_params(final_params, f)
 
     @staticmethod
-    def load_params(filename: Path) -> dict[str, Any]:
+    def load_params(data: bytes | str) -> dict[str, Any]:
+        """
+        Load parameters from the raw content of a parameter file
+        """
+        return rapidjson.loads(data, number_mode=HYPER_PARAMS_FILE_FORMAT)
+
+    @staticmethod
+    def load_params_from_file(filename: Path) -> dict[str, Any]:
         """
         Load parameters from file
         """
-        with filename.open("r") as f:
-            params = rapidjson.load(f, number_mode=HYPER_PARAMS_FILE_FORMAT)
-        return params
+        return HyperoptTools.load_params(filename.read_text())
 
     @staticmethod
     def try_export_params(config: Config, strategy_name: str, params: dict):
@@ -396,7 +404,7 @@ class HyperoptTools:
         ]
         perc_multi = 100
 
-        param_metrics = [("params_dict." + param) for param in results[0]["params_dict"].keys()]
+        param_metrics = [("params_dict." + param) for param in results[0]["params_dict"]]
         trials = trials[base_metrics + param_metrics]
 
         base_columns = [

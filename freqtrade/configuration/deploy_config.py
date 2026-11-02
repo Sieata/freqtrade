@@ -28,6 +28,21 @@ def validate_is_float(val):
         return False
 
 
+def parse_stake_amount(val: str) -> str | int | float:
+    if val == UNLIMITED_STAKE_AMOUNT:
+        return val
+    return int(val) if validate_is_int(val) else float(val)
+
+
+def exchange_requires_password(exchange_name: str) -> bool:
+    import ccxt
+
+    exchange_class = getattr(ccxt, exchange_name, None)
+    if exchange_class is None:
+        return False
+    return bool(exchange_class().requiredCredentials.get("password"))
+
+
 def ask_user_overwrite(config_path: Path) -> bool:
     questions = [
         {
@@ -70,9 +85,7 @@ def ask_user_config() -> dict[str, Any]:
             "message": f"Please insert your stake amount (Number or '{UNLIMITED_STAKE_AMOUNT}'):",
             "default": "unlimited",
             "validate": lambda val: val == UNLIMITED_STAKE_AMOUNT or validate_is_float(val),
-            "filter": lambda val: (
-                '"' + UNLIMITED_STAKE_AMOUNT + '"' if val == UNLIMITED_STAKE_AMOUNT else val
-            ),
+            "filter": parse_stake_amount,
         },
         {
             "type": "text",
@@ -80,6 +93,7 @@ def ask_user_config() -> dict[str, Any]:
             "message": "Please insert max_open_trades (Integer or -1 for unlimited open trades):",
             "default": "3",
             "validate": lambda val: validate_is_int(val),
+            "filter": lambda val: int(val),
         },
         {
             "type": "select",
@@ -137,8 +151,8 @@ def ask_user_config() -> dict[str, Any]:
         },
         {
             "type": "password",
-            "name": "exchange_key",
-            "message": "Insert Exchange Key",
+            "name": "exchange_api_key",
+            "message": "Insert Exchange API Key",
             "when": lambda x: not x["dry_run"],
         },
         {
@@ -149,9 +163,9 @@ def ask_user_config() -> dict[str, Any]:
         },
         {
             "type": "password",
-            "name": "exchange_key_password",
+            "name": "exchange_api_key_password",
             "message": "Insert Exchange API Key password",
-            "when": lambda x: not x["dry_run"] and x["exchange_name"] in ("kucoin", "okx"),
+            "when": lambda x: not x["dry_run"] and exchange_requires_password(x["exchange_name"]),
         },
         {
             "type": "confirm",
@@ -199,6 +213,9 @@ def ask_user_config() -> dict[str, Any]:
             "name": "api_server_password",
             "message": "Insert api-server password",
             "when": lambda x: x["api_server"],
+            "validate": lambda val: (
+                len(val) > 5 or "Please enter a password (minimum 6 characters)."
+            ),
         },
     ]
     answers = prompt(questions)
@@ -227,6 +244,9 @@ def deploy_new_config(config_path: Path, selections: dict[str, Any]) -> None:
     from freqtrade.exchange import MAP_EXCHANGE_CHILDCLASS
     from freqtrade.util import render_template
 
+    selections["exchange_requires_password"] = exchange_requires_password(
+        selections["exchange_name"]
+    )
     try:
         exchange_template = MAP_EXCHANGE_CHILDCLASS.get(
             selections["exchange_name"], selections["exchange_name"]

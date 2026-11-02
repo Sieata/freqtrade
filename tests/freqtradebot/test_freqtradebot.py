@@ -60,7 +60,7 @@ from tests.conftest_trades import (
     mock_order_5_stoploss,
     mock_order_6_sell,
 )
-from tests.conftest_trades_usdt import mock_trade_usdt_4
+from tests.conftest_trades_usdt import mock_trade_usdt_4, mock_trade_usdt_5
 
 
 def patch_RPCManager(mocker) -> MagicMock:
@@ -105,6 +105,23 @@ def test_process_calls_sendmsg(mocker, default_conf_usdt) -> None:
     assert freqtrade.rpc.process_msg_queue.call_count == 1
 
 
+def test_process_scheduled_job_error(mocker, default_conf_usdt, caplog) -> None:
+    # Unexpected errors in scheduled jobs (e.g. the daily wallet snapshot) must not
+    # bring down the bot.
+    mocker.patch(
+        "freqtrade.wallets.Wallets.record_wallet_state",
+        side_effect=AttributeError("'str' object has no attribute 'keys'"),
+    )
+    freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
+    # Make all jobs due
+    for job in freqtrade._schedule.jobs:
+        job.next_run = dt_now().replace(tzinfo=None) - timedelta(seconds=1)
+
+    freqtrade.process()
+    assert log_has_re(r"Error in scheduled job .*record_wallet_state.*", caplog)
+    assert freqtrade.rpc.process_msg_queue.call_count == 1
+
+
 def test_bot_cleanup(mocker, default_conf_usdt, caplog) -> None:
     mock_cleanup = mocker.patch("freqtrade.freqtradebot.Trade.commit")
     coo_mock = mocker.patch("freqtrade.freqtradebot.FreqtradeBot.cancel_all_open_orders")
@@ -119,9 +136,9 @@ def test_bot_cleanup(mocker, default_conf_usdt, caplog) -> None:
     assert coo_mock.call_count == 1
 
 
-def test_bot_cleanup_db_errors(mocker, default_conf_usdt, caplog) -> None:
+def test_bot_cleanup_db_errors(mocker, default_conf_usdt, caplog, monkeypatch) -> None:
     mocker.patch("freqtrade.freqtradebot.Trade.commit", side_effect=OperationalException())
-    mocker.patch(
+    check_mock = mocker.patch(
         "freqtrade.freqtradebot.FreqtradeBot.check_for_open_trades",
         side_effect=OperationalException(),
     )
@@ -130,6 +147,17 @@ def test_bot_cleanup_db_errors(mocker, default_conf_usdt, caplog) -> None:
     freqtrade.emc.shutdown = MagicMock()
     freqtrade.cleanup()
     assert freqtrade.emc.shutdown.call_count == 1
+    assert check_mock.call_count == 1
+    assert log_has_re(r"Exception during cleanup: OperationalException.*", caplog)
+
+    # Startup failed before init_db() - Trade.session doesn't exist.
+    caplog.clear()
+    check_mock.reset_mock()
+    monkeypatch.delattr(Trade, "session")
+    freqtrade.cleanup()
+    assert check_mock.call_count == 0
+    assert not log_has_re(r"Exception during cleanup.*", caplog)
+    assert not log_has_re(r"Error during cleanup.*", caplog)
 
 
 @pytest.mark.parametrize("runmode", [RunMode.DRY_RUN, RunMode.LIVE])
@@ -166,6 +194,69 @@ def test_order_dict(default_conf_usdt, mocker, runmode, caplog) -> None:
     assert not log_has_re(r".*stoploss_on_exchange .* dry-run", caplog)
 
 
+def test_validate_informative_candle_types(default_conf_usdt, mocker) -> None:
+
+    patch_RPCManager(mocker)
+    patch_exchange(mocker)
+    freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
+
+    mocker.patch.object(
+        freqtrade.strategy,
+        "gather_informative_pairs",
+        return_value=[
+            ("XRP/USDT", "1h", CandleType.SPOT),
+            ("XRP/USDT:USDT", "1h", CandleType.OPEN_INTEREST),
+        ],
+    )
+    # Supported by the exchange - no complaints
+    mocker.patch(f"{EXMS}.check_candle_type_support", return_value=True)
+    freqtrade.validate_informative_candle_types()
+
+    mocker.patch(
+        f"{EXMS}.check_candle_type_support",
+        side_effect=lambda ct: ct != CandleType.OPEN_INTEREST,
+    )
+    with pytest.raises(
+        OperationalException,
+        match=r"requests informative data of type open_interest, which .* does not provide",
+    ):
+        freqtrade.validate_informative_candle_types()
+
+    # Each unsupported type is reported once, even across many pairs
+    mocker.patch.object(
+        freqtrade.strategy,
+        "gather_informative_pairs",
+        return_value=[
+            ("XRP/USDT:USDT", "1h", CandleType.OPEN_INTEREST),
+            ("BTC/USDT:USDT", "4h", CandleType.OPEN_INTEREST),
+            ("BTC/USDT:USDT", "1h", CandleType.FUNDING_RATE),
+        ],
+    )
+    mocker.patch(f"{EXMS}.check_candle_type_support", return_value=False)
+    with pytest.raises(
+        OperationalException, match=r"type funding_rate, open_interest, which .* does not provide"
+    ):
+        freqtrade.validate_informative_candle_types()
+
+
+def test_validate_informative_candle_types_on_init(default_conf_usdt, mocker) -> None:
+    """The check has to run during startup, not only when called directly."""
+    patch_RPCManager(mocker)
+    patch_exchange(mocker)
+    mocker.patch(f"{EXMS}.get_fee", return_value=0.0025)
+    mocker.patch(
+        "freqtrade.strategy.interface.IStrategy.gather_informative_pairs",
+        return_value=[("XRP/USDT:USDT", "1h", CandleType.OPEN_INTEREST)],
+    )
+    mocker.patch(f"{EXMS}.check_candle_type_support", return_value=False)
+
+    with pytest.raises(
+        OperationalException,
+        match=r"requests informative data of type open_interest, which .* does not provide",
+    ):
+        FreqtradeBot(default_conf_usdt)
+
+
 def test_get_trade_stake_amount(default_conf_usdt, mocker) -> None:
     patch_RPCManager(mocker)
     patch_exchange(mocker)
@@ -188,16 +279,16 @@ def test_load_strategy_no_keys(default_conf_usdt, mocker, runmode, caplog) -> No
     strategy_config = freqtrade.strategy.config
     assert id(strategy_config["exchange"]) == id(conf["exchange"])
     # Keys have been removed and are not passed to the exchange
-    assert strategy_config["exchange"]["key"] == ""
-    assert strategy_config["exchange"]["secret"] == ""
+    assert strategy_config["exchange"]["api_key"] is None
+    assert strategy_config["exchange"]["secret"] is None
 
     assert erm.call_count == 1
     ex_conf = erm.call_args_list[0][1]["exchange_config"]
     assert id(ex_conf) != id(conf["exchange"])
     # Keys are still present
-    assert ex_conf["key"] != ""
-    assert ex_conf["key"] == default_conf_usdt["exchange"]["key"]
-    assert ex_conf["secret"] != ""
+    assert ex_conf["api_key"] is not None
+    assert ex_conf["api_key"] == default_conf_usdt["exchange"]["api_key"]
+    assert ex_conf["secret"] is not None
     assert ex_conf["secret"] == default_conf_usdt["exchange"]["secret"]
 
 
@@ -2656,6 +2747,47 @@ def test_handle_cancel_enter_exchanges(
 
 
 @pytest.mark.parametrize("is_short", [False, True])
+def test_handle_cancel_enter_dca(mocker, default_conf_usdt, ticker_usdt, fee, is_short) -> None:
+    """
+    A partially filled position adjustment order must be cancellable - the trade already
+    holds an exitable position from the initial entry.
+    """
+    cancel_order_mock = MagicMock(
+        return_value={"id": "dca_12345", "status": "canceled", "filled": 1.0}
+    )
+    mocker.patch.multiple(
+        EXMS,
+        fetch_ticker=ticker_usdt,
+        get_min_pair_stake_amount=MagicMock(return_value=10),
+        cancel_order_with_result=cancel_order_mock,
+    )
+    freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
+
+    trade = mock_trade_usdt_5(fee, is_short)
+    dca_order = {
+        "id": "dca_12345",
+        "symbol": trade.pair,
+        "status": "open",
+        "side": entry_side(is_short),
+        "type": "limit",
+        "price": 2.0,
+        "amount": 5.0,
+        "filled": 1.0,
+        "remaining": 4.0,
+    }
+    trade.orders.append(Order.parse_from_ccxt_object(dca_order, trade.pair, entry_side(is_short)))
+    Trade.session.add(trade)
+    Trade.commit()
+
+    # Filled amount alone (1.0 * 2.0) is below minstake - the existing position is not.
+    assert not freqtrade.handle_cancel_enter(
+        trade, dca_order, trade.open_orders[0], CANCEL_REASON["TIMEOUT"]
+    )
+    assert cancel_order_mock.call_count == 1
+    assert not trade.has_open_orders
+
+
+@pytest.mark.parametrize("is_short", [False, True])
 @pytest.mark.parametrize("cancelorder", [{}, {"remaining": None}, "String Return value", 123])
 def test_handle_cancel_enter_corder_empty(
     mocker, default_conf_usdt, limit_order, is_short, fee, cancelorder
@@ -4618,7 +4750,7 @@ def test_check_for_open_trades(mocker, default_conf_usdt, fee, is_short):
 
 @pytest.mark.parametrize("is_short", [False, True])
 @pytest.mark.usefixtures("init_persistence")
-def test_startup_update_open_orders(mocker, default_conf_usdt, fee, caplog, is_short):
+def test_startup_update_open_orders(mocker, default_conf_usdt, fee, caplog, is_short, time_machine):
     freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
     create_mock_trades(fee, is_short=is_short)
     mocker.patch(f"{EXMS}._dry_is_price_crossed", return_value=False)
@@ -4649,7 +4781,15 @@ def test_startup_update_open_orders(mocker, default_conf_usdt, fee, caplog, is_s
 
     mocker.patch(f"{EXMS}.fetch_order", side_effect=InvalidOrderException)
     hto_mock = mocker.patch("freqtrade.freqtradebot.FreqtradeBot.handle_cancel_order")
+    # Recent orders which are not found should be kept open.
+    caplog.clear()
+    freqtrade.startup_update_open_orders()
+    assert not log_has_re(r"Order is older than \d days.*", caplog)
+    assert hto_mock.call_count == 0
+    assert len(Order.get_open_orders()) == 3
+
     # Orders which are no longer found after X days should be assumed as canceled.
+    time_machine.move_to(dt_now() + timedelta(days=6))
     freqtrade.startup_update_open_orders()
     assert log_has_re(r"Order is older than \d days.*", caplog)
     assert hto_mock.call_count == 3
@@ -5316,32 +5456,34 @@ def test_update_funding_fees(
     date_eight = dt_utc(2021, 9, 1, 8)
     date_sixteen = dt_utc(2021, 9, 1, 16)
     columns = ["date", "open", "high", "low", "close", "volume"]
+    # Funding rates are stored as date + funding_rate (see freqtrade/candle_columns.py)
+    funding_columns = ["date", "funding_rate"]
     # 16:00 entry is actually never used
     # But should be kept in the test to ensure we're filtering correctly.
     funding_rates = {
         "LTC/USDT": DataFrame(
             [
-                [date_midnight, 0.00032583, 0, 0, 0, 0],
-                [date_eight, 0.00024472, 0, 0, 0, 0],
-                [date_sixteen, 0.00024472, 0, 0, 0, 0],
+                [date_midnight, 0.00032583],
+                [date_eight, 0.00024472],
+                [date_sixteen, 0.00024472],
             ],
-            columns=columns,
+            columns=funding_columns,
         ),
         "ETH/USDT": DataFrame(
             [
-                [date_midnight, 0.0001, 0, 0, 0, 0],
-                [date_eight, 0.0001, 0, 0, 0, 0],
-                [date_sixteen, 0.0001, 0, 0, 0, 0],
+                [date_midnight, 0.0001],
+                [date_eight, 0.0001],
+                [date_sixteen, 0.0001],
             ],
-            columns=columns,
+            columns=funding_columns,
         ),
         "XRP/USDT": DataFrame(
             [
-                [date_midnight, 0.00049426, 0, 0, 0, 0],
-                [date_eight, 0.00032715, 0, 0, 0, 0],
-                [date_sixteen, 0.00032715, 0, 0, 0, 0],
+                [date_midnight, 0.00049426],
+                [date_eight, 0.00032715],
+                [date_sixteen, 0.00032715],
             ],
-            columns=columns,
+            columns=funding_columns,
         ),
     }
 
@@ -5419,7 +5561,7 @@ def test_update_funding_fees(
                 sum(
                     trade.amount
                     * mark_prices[trade.pair].iloc[1:2]["open"]
-                    * funding_rates[trade.pair].iloc[1:2]["open"]
+                    * funding_rates[trade.pair].iloc[1:2]["funding_rate"]
                     * multiple
                 )
             )
@@ -5433,7 +5575,7 @@ def test_update_funding_fees(
             sum(
                 trade.amount
                 * mark_prices[trade.pair].iloc[1:2]["open"]
-                * funding_rates[trade.pair].iloc[1:2]["open"]
+                * funding_rates[trade.pair].iloc[1:2]["funding_rate"]
                 * multiple
             )
         )
@@ -6152,3 +6294,56 @@ def test_check_and_call_adjust_trade_position(mocker, default_conf_usdt, fee, ca
     trade = Trade.get_trades(trade_filter=[Trade.id == 5]).first()
     assert trade.orders[-1].ft_order_tag == "partial_exit_c"
     assert trade.is_open
+
+
+@pytest.mark.parametrize(
+    "order_price,expected_price",
+    [
+        (None, 2.2),
+        (0, 2.2),
+        (2.5, 2.5),
+    ],
+)
+def test_handle_cancel_order_emergency_exit_price(
+    mocker, default_conf_usdt, fee, order_price, expected_price
+) -> None:
+    # Some exchanges (e.g. krakenfutures) return no price for a cancelled order.
+    default_conf_usdt["unfilledtimeout"]["exit_timeout_count"] = 1
+    freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
+    mocker.patch.object(freqtrade, "handle_cancel_exit", return_value=True)
+    mocker.patch.object(Trade, "get_canceled_exit_order_count", return_value=1)
+    exit_mock = mocker.patch.object(freqtrade, "execute_trade_exit")
+
+    trade = Trade(
+        pair="LTC/USDT",
+        amount=10.0,
+        exchange="binance",
+        open_rate=2.0,
+        open_date=dt_now() - timedelta(days=2),
+        fee_open=fee.return_value,
+        fee_close=fee.return_value,
+        stake_amount=20.0,
+        is_short=False,
+    )
+    order_obj = Order(
+        ft_order_side="sell",
+        ft_pair=trade.pair,
+        ft_is_open=True,
+        order_id="sell_123456",
+        status="open",
+        symbol=trade.pair,
+        order_type="limit",
+        side="sell",
+        price=2.2,
+        filled=0.0,
+        remaining=10.0,
+        amount=10.0,
+    )
+    trade.orders = [order_obj]
+    order = {"id": "sell_123456", "side": "sell", "amount": 10.0, "price": order_price}
+
+    assert freqtrade.handle_cancel_order(order, order_obj, trade, CANCEL_REASON["TIMEOUT"])
+
+    assert exit_mock.call_count == 1
+    assert exit_mock.call_args[0][1] == expected_price
+    assert exit_mock.call_args[1]["sub_trade_amt"] == 10.0

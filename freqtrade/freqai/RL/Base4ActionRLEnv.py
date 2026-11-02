@@ -113,7 +113,7 @@ class Base4ActionRLEnv(BaseEnvironment):
     def is_tradesignal(self, action: int) -> bool:
         """
         Determine if the signal is a trade signal
-        e.g.: agent wants a Actions.Long_exit while it is in a Positions.short
+        e.g.: agent wants an Actions.Long_exit while it is in a Positions.short
         """
         return not (
             (action == Actions.Neutral.value and self._position == Positions.Neutral)
@@ -129,16 +129,14 @@ class Base4ActionRLEnv(BaseEnvironment):
     def _is_valid(self, action: int) -> bool:
         """
         Determine if the signal is valid.
-        e.g.: agent wants a Actions.Long_exit while it is in a Positions.short
+        e.g.: agent wants an Actions.Long_exit while it is in a Positions.short
         """
-        # Agent should only try to exit if it is in position
         if action == Actions.Exit.value:
-            if self._position not in (Positions.Short, Positions.Long):
-                return False
+            # Agent should only try to exit if it is in position
+            return self._position in (Positions.Short, Positions.Long)
 
-        # Agent should only try to enter if it is not in position
         if action in (Actions.Short_enter.value, Actions.Long_enter.value):
-            if self._position != Positions.Neutral:
-                return False
+            # Agent should only try to enter if it is not in position
+            return self._position == Positions.Neutral
 
         return True

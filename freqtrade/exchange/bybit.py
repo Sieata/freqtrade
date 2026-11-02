@@ -26,7 +26,9 @@ class Bybit(Exchange):
     _ft_has: FtHas = {
         "ohlcv_has_history": True,
         "order_time_in_force": ["GTC", "FOK", "IOC", "PO"],
-        "ws_enabled": True,
+        # Must be one of 1, 50, 200, 1000 - ccxt raises BadRequest for anything else.
+        "ws_orderbook_depth": 50,
+        "ws_enabled": {"ohlcv": True, "orderbook": True},
         "trades_has_history": False,  # Endpoint doesn't support pagination
         "fetch_orders_limit_minutes": 7 * 1440,  # 7 days
         "exchange_has_overrides": {
@@ -42,6 +44,7 @@ class Bybit(Exchange):
     _ft_has_futures: FtHas = {
         "ohlcv_has_history": True,
         "funding_fee_candle_limit": 200,
+        "open_interest_candle_limit": 200,
         "stoploss_on_exchange": True,
         "stoploss_order_types": {"limit": "limit", "market": "market"},
         "stoploss_blocks_assets": False,

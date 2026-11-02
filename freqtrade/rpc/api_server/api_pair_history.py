@@ -4,9 +4,14 @@ from copy import deepcopy
 from fastapi import APIRouter, Depends, HTTPException
 
 from freqtrade.configuration import validate_config_consistency
+from freqtrade.exceptions import ConfigurationError
 from freqtrade.rpc.api_server.api_pairlists import handleExchangePayload
-from freqtrade.rpc.api_server.api_schemas import PairHistory, PairHistoryRequest
-from freqtrade.rpc.api_server.deps import get_config, get_exchange, verify_strategy
+from freqtrade.rpc.api_server.api_schemas import (
+    PairHistory,
+    PairHistoryRequest,
+    StrategyName,
+)
+from freqtrade.rpc.api_server.deps import get_config, get_exchange
 from freqtrade.rpc.rpc import RPC
 
 
@@ -20,12 +25,11 @@ def pair_history(
     pair: str,
     timeframe: str,
     timerange: str,
-    strategy: str,
+    strategy: StrategyName,
     freqaimodel: str | None = None,
     config=Depends(get_config),
     exchange=Depends(get_exchange),
 ):
-    verify_strategy(strategy)
     # The initial call to this endpoint can be slow, as it may need to initialize
     # the exchange class.
     config_loc = deepcopy(config)
@@ -46,7 +50,6 @@ def pair_history(
 
 @router.post("/pair_history", response_model=PairHistory, tags=["Candle data"])
 def pair_history_filtered(payload: PairHistoryRequest, config=Depends(get_config)):
-    verify_strategy(payload.strategy)
     # The initial call to this endpoint can be slow, as it may need to initialize
     # the exchange class.
     config_loc = deepcopy(config)
@@ -73,7 +76,10 @@ def pair_history_filtered(payload: PairHistoryRequest, config=Depends(get_config
             exchange,
             payload.columns,
             payload.live_mode,
+            [dict(p) for p in (payload.strategy_params or [])],
         )
+    except ConfigurationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Error in pair_history_filtered")
         raise HTTPException(status_code=502, detail=str(e))

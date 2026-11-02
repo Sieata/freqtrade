@@ -254,9 +254,7 @@ def text_table_add_metrics(strat_results: dict) -> None:
                 ),
                 (
                     "Drawdown duration",
-                    strat_results["drawdown_duration"]
-                    if "drawdown_duration" in strat_results
-                    else "N/A",
+                    strat_results.get("drawdown_duration", "N/A"),
                 ),
                 (
                     "Profit at drawdown start",
@@ -344,9 +342,7 @@ def text_table_add_metrics(strat_results: dict) -> None:
                         ),
                         (
                             "Drawdown duration",
-                            wallet_stats["drawdown_duration"]
-                            if "drawdown_duration" in wallet_stats
-                            else "N/A",
+                            wallet_stats.get("drawdown_duration", "N/A"),
                         ),
                         (
                             "Profit at drawdown start",
@@ -591,6 +587,27 @@ def show_backtest_result(
     text_table_add_metrics(results)
 
     print()
+
+
+def show_backtest_params(strategy: str, params: dict[str, dict[str, Any]]) -> None:
+    """
+    Print the parameters a stored backtest was run with.
+    :param strategy: Name of the strategy the parameters belong to
+    :param params: Parameters, grouped by space
+    """
+    if not params:
+        return
+    output = [
+        (space, name, str(value))
+        for space, space_params in params.items()
+        for name, value in space_params.items()
+    ]
+    print_rich_table(
+        output,
+        ["Space", "Parameter", "Value"],
+        summary=f"STRATEGY PARAMETERS FOR {strategy}",
+        justify="left",
+    )
 
 
 def show_backtest_results(config: Config, backtest_stats: BacktestResultType):

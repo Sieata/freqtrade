@@ -2,15 +2,12 @@ import logging
 from collections.abc import Callable
 from copy import deepcopy
 from functools import wraps
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
 from freqtrade.exceptions import StrategyError
 
 
 logger = logging.getLogger(__name__)
-
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 def __format_traceback(error: Exception) -> str:
@@ -28,7 +25,9 @@ def __format_traceback(error: Exception) -> str:
     return ""
 
 
-def strategy_safe_wrapper(f: F, message: str = "", default_retval=None, supress_error=False) -> F:
+def strategy_safe_wrapper[F: Callable[..., Any]](
+    f: F, message: str = "", default_retval=None, supress_error=False
+) -> F:
     """
     Wrapper around user-provided methods and functions.
     Caches all exceptions and returns either the default_retval (if it's not None) or raises
@@ -38,11 +37,10 @@ def strategy_safe_wrapper(f: F, message: str = "", default_retval=None, supress_
     @wraps(f)
     def wrapper(*args, **kwargs):
         try:
-            if not (getattr(f, "__qualname__", "")).startswith("IStrategy."):
-                # Don't deep-copy if the function is not implemented in the user strategy.``
-                if "trade" in kwargs:
-                    # Protect accidental modifications from within the strategy
-                    kwargs["trade"] = deepcopy(kwargs["trade"])
+            if not (getattr(f, "__qualname__", "")).startswith("IStrategy.") and "trade" in kwargs:
+                # Protect accidental modifications from within the strategy
+                # but don't deep-copy if the function is not implemented in the user strategy.
+                kwargs["trade"] = deepcopy(kwargs["trade"])
             return f(*args, **kwargs)
         except ValueError as error:
             traceback = __format_traceback(error)

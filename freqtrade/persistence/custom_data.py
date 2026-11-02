@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, select
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from freqtrade.constants import DATETIME_PRINT_FORMAT
@@ -73,7 +73,7 @@ class _CustomData(ModelBase):
         if trade_id is not None:
             filters.append(_CustomData.ft_trade_id == trade_id)
         if key is not None:
-            filters.append(_CustomData.cd_key.ilike(key))
+            filters.append(func.lower(_CustomData.cd_key) == key.lower())
 
         return _CustomData.session.scalars(select(_CustomData).filter(*filters)).all()
 
@@ -112,9 +112,22 @@ class CustomDataWrapper:
             CustomDataWrapper.custom_data = []
 
     @staticmethod
-    def delete_custom_data(trade_id: int) -> None:
-        _CustomData.session.query(_CustomData).filter(_CustomData.ft_trade_id == trade_id).delete()
-        _CustomData.session.commit()
+    def delete_custom_data(trade_id: int, key: str | None = None) -> None:
+        if CustomDataWrapper.use_db:
+            filters = [_CustomData.ft_trade_id == trade_id]
+            if key is not None:
+                filters.append(func.lower(_CustomData.cd_key) == key.lower())
+            _CustomData.session.query(_CustomData).filter(*filters).delete()
+            _CustomData.session.commit()
+        else:
+            CustomDataWrapper.custom_data = [
+                data_entry
+                for data_entry in CustomDataWrapper.custom_data
+                if not (
+                    data_entry.ft_trade_id == trade_id
+                    and (key is None or data_entry.cd_key.casefold() == key.casefold())
+                )
+            ]
 
     @staticmethod
     def get_custom_data(*, trade_id: int, key: str | None = None) -> list[_CustomData]:
@@ -123,7 +136,7 @@ class CustomDataWrapper:
                 _CustomData.ft_trade_id == trade_id,
             ]
             if key is not None:
-                filters.append(_CustomData.cd_key.ilike(key))
+                filters.append(func.lower(_CustomData.cd_key) == key.lower())
             filtered_custom_data = _CustomData.session.scalars(
                 select(_CustomData).filter(*filters)
             ).all()
@@ -161,6 +174,7 @@ class CustomDataWrapper:
         custom_data = CustomDataWrapper.get_custom_data(trade_id=trade_id, key=key)
         if custom_data:
             data_entry = custom_data[0]
+            data_entry.cd_type = value_type
             data_entry.cd_value = value_db
             data_entry.updated_at = dt_now()
         else:

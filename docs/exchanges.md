@@ -20,12 +20,12 @@ Some exchanges require special configuration, which can be found below.
 
 ### Sample exchange configuration
 
-A exchange configuration for "binance" would look as follows:
+An exchange configuration for "binance" would look as follows:
 
 ```json
 "exchange": {
     "name": "binance",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret",
     "ccxt_config": {},
     "ccxt_async_config": {},
@@ -34,13 +34,17 @@ A exchange configuration for "binance" would look as follows:
 
 ### Setting rate limits
 
+!!! Warning "Don't change rate limits"
+    We recommend to not set rateLimit explicitly, but let ccxt handle this.  
+    Messing with rate limits manually will change the ccxt ratelimit behavior and usually has a negative impact on the performance and reliability of your trading bot.
+
 Usually, rate limits set by CCXT are reliable and work well.
 In case of problems related to rate-limits (usually DDOS Exceptions in your logs), it's easy to change rateLimit settings to other values.
 
 ```json
 "exchange": {
     "name": "kraken",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret",
     "ccxt_config": {"enableRateLimit": true},
     "ccxt_async_config": {
@@ -51,10 +55,6 @@ In case of problems related to rate-limits (usually DDOS Exceptions in your logs
 
 This configuration enables kraken, as well as rate-limiting to avoid bans from the exchange.
 `"rateLimit": 3100` defines a wait-event of 3.1s between each call. This can also be completely disabled by setting `"enableRateLimit"` to false.
-
-!!! Note
-    Optimal settings for rate-limiting depend on the exchange and the size of the whitelist, so an ideal parameter will vary on many other settings.
-    We try to provide sensible defaults per exchange where possible, if you encounter bans please make sure that `"enableRateLimit"` is enabled and increase the `"rateLimit"` parameter step by step.
 
 ## Binance
 
@@ -95,7 +95,7 @@ They can however also be configured via configuration file. Since json doesn't s
 
 ``` json
 // ...
- "key": "<someapikey>",
+ "api_key": "<someapikey>",
  "secret": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBABACAFQA<...>s8KX8=\n-----END PRIVATE KEY-----"
 // ...
 ```
@@ -224,7 +224,7 @@ Kraken Futures uses the exchange id `krakenfutures` and supports isolated future
 ```jsonc
 "exchange": {
     "name": "krakenfutures",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret"
 },
 "trading_mode": "futures",
@@ -250,7 +250,7 @@ Kucoin requires a passphrase for each api key, you will therefore need to add th
 ```json
 "exchange": {
     "name": "kucoin",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret",
     "password": "your_exchange_api_key_password",
     // ...
@@ -283,7 +283,7 @@ OKX requires a passphrase for each api key, you will therefore need to add this 
 ```json
 "exchange": {
     "name": "okx",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret",
     "password": "your_exchange_api_key_password",
     // ...
@@ -364,7 +364,7 @@ Bitget requires a passphrase for each api key, you will therefore need to add th
 ```json
 "exchange": {
     "name": "bitget",
-    "key": "your_exchange_key",
+    "api_key": "your_exchange_api_key",
     "secret": "your_exchange_secret",
     "password": "your_exchange_api_key_password",
     // ...
@@ -459,7 +459,7 @@ Hyperliquid allows you to create vaults. To use vaults with Freqtrade, you will 
     "privateKey": "your_api_private_key", // API wallet private key (see https://app.hyperliquid.xyz/API). You'll only need the private key.
     "ccxt_config": {
         "options": {
-            "vaultAddress": "your_vault_address", // Optional, only if you want to use a vault ... (vault address must also be added to walletAdress)
+            "vaultAddress": "your_vault_address", // Optional, only if you want to use a vault ... (vault address must also be added to walletAddress)
         }
     },
     // ...
@@ -511,7 +511,7 @@ If your account is required to use an operatorId, you can set it in the configur
 ``` json
 "exchange": {
         "name": "bitvavo",
-        "key": "",
+        "api_key": "",
         "secret": "",
         "ccxt_config": {
             "options": {

@@ -21,7 +21,7 @@ from ccxt import TICK_SIZE
 from dateutil import parser
 from pandas import DataFrame, Timestamp, concat
 
-from freqtrade.configuration import remove_exchange_credentials
+from freqtrade.configuration import remove_exchange_credentials, sanitize_config
 from freqtrade.constants import (
     DEFAULT_AMOUNT_RESERVE_PERCENT,
     DEFAULT_TRADES_COLUMNS,
@@ -92,6 +92,7 @@ from freqtrade.exchange.exchange_utils import (
     is_exchange_known_ccxt,
     market_is_active,
     price_to_precision,
+    resolve_ws_enabled,
 )
 from freqtrade.exchange.exchange_utils_timeframe import (
     timeframe_to_minutes,
@@ -109,6 +110,7 @@ from freqtrade.misc import (
     safe_value_fallback,
     safe_value_nested,
 )
+from freqtrade.mixins import LoggingMixin
 from freqtrade.util import FtTTLCache, PeriodicCache, dt_from_ts, dt_now
 from freqtrade.util.datetime_helpers import dt_humanize_delta, dt_ts, format_ms_time
 
@@ -118,7 +120,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-class Exchange:
+class Exchange(LoggingMixin):
     # Parameters to add directly to buy/sell calls (like agreeing to trading agreement)
     _params: dict = {}
 
@@ -140,10 +142,16 @@ class Exchange:
         "ohlcv_has_history": True,  # Some exchanges (Kraken) don't provide history via ohlcv
         "ohlcv_partial_candle": True,
         "ohlcv_require_since": False,
+        # Seconds after the candle close time to assume a candle is actually closed
+        "ohlcv_late_candle_grace_secs": 15,
+        # Maximum seconds a pair with missing candles may go unqueried. Keeps pairs on long
+        # timeframes from being skipped for a whole candle when the exchange lags behind.
+        "ohlcv_max_poll_interval_secs": 30 * 60,
         "download_data_parallel_quick": True,
         "always_require_api_keys": False,  # purge API keys for Dry-run. Must default to false.
         # Check https://github.com/ccxt/ccxt/issues/10767 for removal of ohlcv_volume_currency
         "ohlcv_volume_currency": "base",  # "base" or "quote"
+        "ohlcv_volume_in_contracts": False,  # candle volume in contracts instead of base
         "tickers_have_quoteVolume": True,
         "tickers_have_percentage": True,
         "tickers_have_bid_ask": True,  # bid / ask empty for fetch_tickers
@@ -155,9 +163,12 @@ class Exchange:
         "l2_limit_range": None,
         "l2_limit_range_required": True,  # Allow Empty L2 limit (kucoin)
         "l2_limit_upper": None,  # Upper limit for L2 limit
+        "orderbook_max_age": 5,
+        "ws_orderbook_depth": None,
         "mark_ohlcv_price": "mark",
         "mark_ohlcv_timeframe": "1h",
         "funding_fee_timeframe": "1h",
+        "funding_history_limit": None,  # Page size for fetch_funding_history
         "ccxt_futures_name": "swap",
         "needs_trading_fees": False,  # use fetch_trading_fees to cache fees
         "balance_includes_unrealized_pnl": False,  # ccxt "total" is plain wallet balance
@@ -168,7 +179,8 @@ class Exchange:
         "exchange_has_overrides": {},  # Dictionary overriding ccxt's "has".
         "proxy_coin_mapping": {},  # Mapping for proxy coins
         # Expected to be in the format {"fetchOHLCV": True} or {"fetchOHLCV": False}
-        "ws_enabled": False,  # Set to true for exchanges with tested websocket support
+        # Set to true per-stream for exchanges with tested websocket support
+        "ws_enabled": {"ohlcv": False, "orderbook": False},
         "has_delisting": False,  # Set to true for exchanges that have delisting pair checks
     }
     _ft_has: FtHas = {}
@@ -192,6 +204,8 @@ class Exchange:
         it does basic validation whether the specified exchange and pairs are valid.
         :return: None
         """
+        # Throttle repeated warnings (e.g. a stale websocket orderbook) to once per period.
+        LoggingMixin.__init__(self, logger, refresh_period=300)
         self._api: ccxt.Exchange
         self._api_async: ccxt_pro.Exchange
         self._ws_async: ccxt_pro.Exchange = None
@@ -229,6 +243,8 @@ class Exchange:
 
         # Holds last candle refreshed time of each pair
         self._pairs_last_refresh_time: dict[PairWithTimeframe, int] = {}
+        # Holds the time each pair was last queried from the exchange
+        self._pairs_last_poll_time: dict[PairWithTimeframe, int] = {}
         # Timestamp of last markets refresh
         self._last_markets_refresh: int = 0
 
@@ -265,6 +281,8 @@ class Exchange:
 
         # Assign this directly for easy access
         self._ohlcv_partial_candle = self._ft_has["ohlcv_partial_candle"]
+        self._ohlcv_late_candle_grace_ms = self._ft_has["ohlcv_late_candle_grace_secs"] * 1000
+        self._ohlcv_max_poll_interval_ms = self._ft_has["ohlcv_max_poll_interval_secs"] * 1000
 
         # Initialize ccxt objects
         ccxt_config = self._ccxt_config
@@ -281,17 +299,29 @@ class Exchange:
             exchange_conf.get("ccxt_async_config", {}), ccxt_async_config
         )
         self._api_async = self._init_ccxt(exchange_conf, False, ccxt_async_config)
-        _has_watch_ohlcv = self.exchange_has("watchOHLCV") and self._ft_has["ws_enabled"]
-        if (
-            self._config["runmode"] in TRADE_MODES
-            and exchange_conf.get("enable_ws", True)
-            and _has_watch_ohlcv
+        # User preference (config), merged per-stream with the exchange's tested capability.
+        enable_ws_user_config = resolve_ws_enabled(exchange_conf.get("enable_ws", True))
+        self._has_watch_ohlcv = (
+            self.exchange_has("watchOHLCV")
+            and self._ft_has["ws_enabled"]["ohlcv"]
+            and enable_ws_user_config["ohlcv"]
+        )
+        self._has_watch_orderbook = (
+            self.exchange_has("watchOrderBook")
+            and self._ft_has["ws_enabled"]["orderbook"]
+            and enable_ws_user_config["orderbook"]
+        )
+        if self._config["runmode"] in TRADE_MODES and (
+            self._has_watch_ohlcv or self._has_watch_orderbook
         ):
             self._ws_async = self._init_ccxt(exchange_conf, False, ccxt_async_config)
-            self._exchange_ws = ExchangeWS(self._config, self._ws_async)
+            self._exchange_ws = ExchangeWS(
+                self._config, self._ws_async, self._ft_has["ws_orderbook_depth"]
+            )
 
         logger.info(f'Using Exchange "{self.name}"')
         self.required_candle_call_count = 1
+        self._startup_candle_count: int = 0
         # Converts the interval provided in minutes in config to seconds
         self.markets_refresh_interval: int = (
             exchange_conf.get("markets_refresh_interval", 60) * 60 * 1000
@@ -301,6 +331,8 @@ class Exchange:
             # Initial markets load
             self.reload_markets(True, load_leverage_tiers=False)
             self.validate_config(self._config)
+            if self._config["runmode"] in TRADE_MODES:
+                self.check_time_offset()
 
         if self.trading_mode != TradingMode.SPOT and load_leverage_tiers:
             self.fill_leverage_tiers()
@@ -312,6 +344,24 @@ class Exchange:
         """
         self.close()
 
+    def _close_async_ccxt(self, ccxt_object: ccxt_pro.Exchange | None, name: str) -> None:
+        """
+        Release the aiohttp sessions of an async ccxt object.
+        Errors are logged, but don't propagate as it's only called in shutdown phase.
+        :param name: Name of the object - used for logging only.
+        """
+        if (
+            ccxt_object is not None
+            and inspect.iscoroutinefunction(ccxt_object.close)
+            # ccxt warns about either of these being left behind in its destructor.
+            and (ccxt_object.session or getattr(ccxt_object, "socks_proxy_sessions", None))
+        ):
+            logger.debug(f"Closing {name} ccxt session.")
+            try:
+                self.loop.run_until_complete(ccxt_object.close())
+            except Exception as e:
+                logger.warning(f"Error closing {name} ccxt session: {e.__class__.__name__} {e}")
+
     def close(self):
         if self._exchange_ws:
             self._exchange_ws.cleanup()
@@ -320,29 +370,17 @@ class Exchange:
             generic_loop = asyncio.get_running_loop()
         except RuntimeError:
             generic_loop = None
-        loop_running = (getattr(self, "loop", None) and self.loop.is_running()) or (
+        loop = getattr(self, "loop", None)
+        loop_running = (loop and loop.is_running()) or (
             generic_loop is not None and generic_loop.is_running()
         )
 
-        if (
-            getattr(self, "_api_async", None)
-            and inspect.iscoroutinefunction(self._api_async.close)
-            and self._api_async.session
-            and not loop_running
-        ):
-            logger.debug("Closing async ccxt session.")
-            self.loop.run_until_complete(self._api_async.close())
-        if (
-            self._ws_async
-            and inspect.iscoroutinefunction(self._ws_async.close)
-            and self._ws_async.session
-            and not loop_running
-        ):
-            logger.debug("Closing ws ccxt session.")
-            self.loop.run_until_complete(self._ws_async.close())
+        if loop and not loop.is_closed() and not loop_running:
+            self._close_async_ccxt(getattr(self, "_api_async", None), "async")
+            self._close_async_ccxt(self._ws_async, "ws")
 
-        if self.loop and not self.loop.is_closed():
-            self.loop.close()
+        if loop and not loop.is_closed():
+            loop.close()
 
     def _init_async_loop(self) -> asyncio.AbstractEventLoop:
         loop = asyncio.new_event_loop()
@@ -350,7 +388,7 @@ class Exchange:
         return loop
 
     def _set_startup_candle_count(self, config: Config) -> None:
-        self._startup_candle_count: int = config.get("startup_candle_count", 0)
+        self._startup_candle_count = config.get("startup_candle_count", 0)
         self.required_candle_call_count = self.validate_required_startup_candles(
             self._startup_candle_count, config.get("timeframe", "")
         )
@@ -399,8 +437,8 @@ class Exchange:
             ),
             "secret": exchange_config.get("secret"),
             "password": exchange_config.get("password"),
-            "uid": exchange_config.get("uid", ""),
-            "accountId": exchange_config.get("account_id", exchange_config.get("accountId", "")),
+            "uid": exchange_config.get("uid"),
+            "accountId": exchange_config.get("account_id", exchange_config.get("accountId")),
             # DEX attributes:
             "walletAddress": exchange_config.get(
                 "wallet_address", exchange_config.get("walletAddress")
@@ -408,7 +446,8 @@ class Exchange:
             "privateKey": exchange_config.get("private_key", exchange_config.get("privateKey")),
         }
         if ccxt_kwargs:
-            logger.info("Applying additional ccxt config: %s", ccxt_kwargs)
+            sanitized = sanitize_config({"exchange": {"ccxt_config": ccxt_kwargs}})
+            logger.info("Applying additional ccxt config: %s", sanitized["exchange"]["ccxt_config"])
         if self._ccxt_params:
             # Inject static options after the above output to not confuse users.
             ccxt_kwargs = deep_merge_dicts(self._ccxt_params, deepcopy(ccxt_kwargs))
@@ -494,6 +533,36 @@ class Exchange:
         Must be overridden in child methods if required.
         """
 
+    def check_time_offset(self) -> None:
+        """
+        Compare the exchange time to the local system time.
+        An out-of-sync clock causes authentication failures on most exchanges, and can cause odd
+        sync issues with freqtrade.
+        """
+        if not self.exchange_has("fetchTime"):
+            logger.debug(f"{self.name} does not support fetchTime, skipping time offset check.")
+            return
+        try:
+            before = dt_ts()
+            exchange_time = self._api.fetch_time()
+            # Use the middle of the request to compensate for the request duration.
+            offset = (before + dt_ts()) // 2 - exchange_time
+        except ccxt.BaseError as e:
+            logger.debug(
+                f"Could not fetch exchange time due to {e.__class__.__name__}. Message: {e}"
+            )
+            return
+
+        # Maximum tolerated deviation between exchange and local time before warning the user.
+        if abs(offset) > 1500:
+            logger.warning(
+                f"Your system time deviates by {offset / 1000:.1f}s from the time of "
+                f"{self.name}. This can cause failing requests - please synchronize your "
+                "system clock (e.g. via NTP)."
+            )
+        else:
+            logger.info(f"Time offset to {self.name} is {offset}ms.")
+
     def _log_exchange_response(self, endpoint: str, response, *, add_info=None) -> None:
         """Log exchange responses"""
         if self.log_responses:
@@ -506,9 +575,9 @@ class Exchange:
         """
         Exchange ohlcv candle limit
         Uses ohlcv_candle_limit_per_timeframe if the exchange has different limits
-        per timeframe (e.g. bittrex), otherwise falls back to ohlcv_candle_limit
+        per timeframe (e.g. htx), otherwise falls back to ohlcv_candle_limit
         :param timeframe: Timeframe to check
-        :param candle_type: Candle-type
+        :param candle_type: Candle type to use (spot, futures, funding_rate, ...)
         :param since_ms: Starting timestamp
         :return: Candle limit as integer
         """
@@ -521,6 +590,8 @@ class Exchange:
         fallback_val = self._ft_has.get("ohlcv_candle_limit", ccxt_val)
         if candle_type == CandleType.FUNDING_RATE:
             fallback_val = self._ft_has.get("funding_fee_candle_limit", fallback_val)
+        elif candle_type == CandleType.OPEN_INTEREST:
+            fallback_val = self._ft_has.get("open_interest_candle_limit", fallback_val)
         return int(
             self._ft_has.get("ohlcv_candle_limit_per_timeframe", {}).get(
                 timeframe, str(fallback_val)
@@ -765,13 +836,15 @@ class Exchange:
     def get_valid_pair_combination(self, curr_1: str, curr_2: str) -> Generator[str, None, None]:
         """
         Get valid pair combination of curr_1 and curr_2 by trying both combinations.
+        Candidates matching the bot's trading mode are yielded first.
         """
+        spot_pairs = (f"{curr_1}/{curr_2}", f"{curr_2}/{curr_1}")
+        futures_pairs = (f"{curr_1}/{curr_2}:{curr_2}", f"{curr_2}/{curr_1}:{curr_1}")
         yielded = False
         for pair in (
-            f"{curr_1}/{curr_2}",
-            f"{curr_2}/{curr_1}",
-            f"{curr_1}/{curr_2}:{curr_2}",
-            f"{curr_2}/{curr_1}:{curr_1}",
+            (*futures_pairs, *spot_pairs)
+            if self.trading_mode == TradingMode.FUTURES
+            else (*spot_pairs, *futures_pairs)
         ):
             if pair in self.markets and self.markets[pair].get("active"):
                 yielded = True
@@ -809,9 +882,10 @@ class Exchange:
         """
         Checks if order-types configured in strategy/config are supported
         """
-        if any(v == "market" for k, v in order_types.items()):
-            if not self.exchange_has("createMarketOrder"):
-                raise ConfigurationError(f"Exchange {self.name} does not support market orders.")
+        if any(v == "market" for k, v in order_types.items()) and not self.exchange_has(
+            "createMarketOrder"
+        ):
+            raise ConfigurationError(f"Exchange {self.name} does not support market orders.")
         self.validate_stop_ordertypes(order_types)
 
     def validate_stop_ordertypes(self, order_types: dict) -> None:
@@ -938,14 +1012,15 @@ class Exchange:
         """
         if trading_mode == TradingMode.SPOT:
             return
-        if allow_none_margin_mode and margin_mode is None:
-            # Verify trading mode independent of margin mode
-            if not any(
+        # Verify trading mode independent of margin mode
+        if (
+            allow_none_margin_mode
+            and margin_mode is None
+            and not any(
                 trading_mode == pair[0] for pair in self._supported_trading_mode_margin_pairs
-            ):
-                raise ConfigurationError(
-                    f"Freqtrade does not support '{trading_mode}' on {self.name}."
-                )
+            )
+        ):
+            raise ConfigurationError(f"Freqtrade does not support '{trading_mode}' on {self.name}.")
 
         if not allow_none_margin_mode and (
             (trading_mode, margin_mode) not in self._supported_trading_mode_margin_pairs
@@ -979,6 +1054,8 @@ class Exchange:
 
         if exchange_conf.get("_ft_has_params"):
             self._ft_has = deep_merge_dicts(exchange_conf.get("_ft_has_params"), self._ft_has)
+            # A plain boolean override replaces the per-stream dict - normalize it.
+            self._ft_has["ws_enabled"] = resolve_ws_enabled(self._ft_has["ws_enabled"])
             logger.info("Overriding exchange._ft_has with config params, result: %s", self._ft_has)
 
     def get_option(self, param: str, default: Any | None = None) -> Any:
@@ -1219,7 +1296,7 @@ class Exchange:
                     "cost": (_amount * average),
                 }
             )
-            # market orders will always incurr taker fees
+            # market orders will always incur taker fees
             dry_order = self.add_dry_order_fee(pair, dry_order, "taker")
 
         dry_order = self.check_dry_limit_order_filled(
@@ -1533,7 +1610,7 @@ class Exchange:
     def _get_stop_order_type(self, user_order_type) -> tuple[str, str]:
         available_order_Types: dict[str, str] = self._ft_has["stoploss_order_types"]
 
-        if user_order_type in available_order_Types.keys():
+        if user_order_type in available_order_Types:
             ordertype = available_order_Types[user_order_type]
         else:
             # Otherwise pick only one available
@@ -1743,17 +1820,20 @@ class Exchange:
             params["stop"] = True
         order = self.fetch_order(order_id, pair, params)
         val = self.get_option("stoploss_algo_order_info_id")
-        if val and order.get("status", "open") == "closed":
-            if new_orderid := order.get("info", {}).get(val):
-                # Fetch real order, which was placed by the algo order.
-                actual_order = self.fetch_order(order_id=new_orderid, pair=pair, params=None)
-                actual_order["id_stop"] = actual_order["id"]
-                actual_order["id"] = order_id
-                actual_order["type"] = "stoploss"
-                actual_order["stopPrice"] = order.get("stopPrice")
-                actual_order["status_stop"] = "triggered"
+        if (
+            val
+            and order.get("status", "open") == "closed"
+            and (new_orderid := order.get("info", {}).get(val))
+        ):
+            # Fetch real order, which was placed by the algo order.
+            actual_order = self.fetch_order(order_id=new_orderid, pair=pair, params=None)
+            actual_order["id_stop"] = actual_order["id"]
+            actual_order["id"] = order_id
+            actual_order["type"] = "stoploss"
+            actual_order["stopPrice"] = order.get("stopPrice")
+            actual_order["status_stop"] = "triggered"
 
-                return actual_order
+            return actual_order
 
         return order
 
@@ -2230,6 +2310,47 @@ class Exchange:
             self._ft_has["l2_limit_range_required"],
             self._ft_has["l2_limit_upper"],
         )
+
+        # Effective limit or 100 (limit could be None from a user call).
+        limit_eff = limit1 or limit or 100
+        # The stream only carries "ws_orderbook_depth" levels. Asking it for more would
+        # fall back to REST on every single call while still paying for the subscription.
+        ws_depth = self._ft_has["ws_orderbook_depth"]
+
+        if (
+            self._has_watch_orderbook
+            and self._exchange_ws
+            and (ws_depth is None or limit_eff <= ws_depth)
+        ):
+            self._exchange_ws.schedule_orderbook(pair)
+
+            ob = self._exchange_ws.get_orderbook(pair, limit_eff)
+            # ccxt.pro creates the orderbook object as soon as watching starts, but it's
+            # empty until the initial snapshot is applied or if getting it fails.
+            # fall back to REST until then.
+            ob_max_age = self._ft_has["orderbook_max_age"]
+            if ob.get("bids") and ob.get("asks"):
+                if not self._exchange_ws.orderbook_is_fresh(pair, ob_max_age):
+                    # Throttled - a stuck feed would otherwise warn on every single call.
+                    self.log_once(
+                        f"Websocket orderbook for {pair} is stale (no update within "
+                        f"{ob_max_age}s) - falling back to REST.",
+                        logger.info,
+                    )
+                elif len(ob["bids"]) < limit_eff or len(ob["asks"]) < limit_eff:
+                    # The websocket book isn't as deep as the REST response would be.
+                    # Returning it anyway would silently change the result of depth-based
+                    # calculations (e.g. check_depth_of_market) - use REST instead.
+                    logger.debug(
+                        "Websocket orderbook for %s only has %s/%s entries - falling back to REST.",
+                        pair,
+                        min(len(ob["bids"]), len(ob["asks"])),
+                        limit_eff,
+                    )
+                else:
+                    logger.debug("Using websocket orderbook for %s", pair)
+                    return ob
+
         try:
             return self._api.fetch_l2_order_book(pair, limit1)
         except ccxt.NotSupported as e:
@@ -2477,6 +2598,7 @@ class Exchange:
         :param amount: Amount of order
         :param price: Price of order
         :param taker_or_maker: 'maker' or 'taker' (ignored if "type" is provided)
+        :return: Fee rate as a float
         """
         if order_type and order_type == "market":
             taker_or_maker = "taker"
@@ -2487,7 +2609,7 @@ class Exchange:
             if self._api.markets is None or len(self._api.markets) == 0:
                 self._api.load_markets(params={})
 
-            return self._api.calculate_fee(
+            fee = self._api.calculate_fee(
                 symbol=symbol,
                 type=order_type,
                 side=side,
@@ -2495,6 +2617,19 @@ class Exchange:
                 price=price,
                 takerOrMaker=taker_or_maker,
             )["rate"]
+            if fee is None:
+                # Exchange didn't provide fees for this market - fall back to the exchange default.
+                fee = self._api.fees.get("trading", {}).get(taker_or_maker)
+            if fee is None:
+                msg = f"Could not determine {taker_or_maker} fee for {symbol} - assuming 0."
+                if self._config["dry_run"]:
+                    # Dry-run and backtesting never see real fees - the 0 would be permanent.
+                    logger.warning(f"{msg} Please set 'fee' in your configuration.")
+                else:
+                    # Live trading updates the fee from the order once it filled.
+                    logger.debug(msg)
+                fee = 0.0
+            return fee
         except ccxt.DDoSProtection as e:
             raise DDosProtection(e) from e
         except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
@@ -2599,7 +2734,7 @@ class Exchange:
         :param pair: Pair to download
         :param timeframe: Timeframe to get data for
         :param since_ms: Timestamp in milliseconds to get history from
-        :param candle_type: '', mark, index, premiumIndex, or funding_rate
+        :param candle_type: Candle type to use (spot, futures, funding_rate, ...)
         :param is_new_pair: used by binance subclass to allow "fast" new pair downloading
         :param until_ms: Timestamp in milliseconds to get history up to
         :return: Dataframe with candle (OHLCV) data
@@ -2616,12 +2751,13 @@ class Exchange:
                 )
             )
         logger.debug(f"Downloaded data for {pair} from ccxt with length {len(data)}.")
-        # funding_rates are always complete, so never need to be dropped.
-        drop_incomplete = (
-            self._ohlcv_partial_candle if candle_type != CandleType.FUNDING_RATE else False
-        )
         return ohlcv_to_dataframe(
-            data, timeframe, pair, fill_missing=False, drop_incomplete=drop_incomplete
+            data,
+            timeframe,
+            pair,
+            fill_missing=False,
+            drop_incomplete=self._drop_incomplete_candle(candle_type),
+            candle_type=candle_type,
         )
 
     async def _async_get_historic_ohlcv(
@@ -2635,7 +2771,7 @@ class Exchange:
     ) -> OHLCVResponse:
         """
         Download historic ohlcv
-        :param candle_type: Any of the enum CandleType (must match trading mode!)
+        :param candle_type: Candle type to use (spot, futures, funding_rate, ...)
         """
 
         one_call = timeframe_to_msecs(timeframe) * self.ohlcv_candle_limit(
@@ -2673,8 +2809,7 @@ class Exchange:
             timeframe,
             candle_type,
             data,
-            # funding_rates are always complete, so never need to be dropped.
-            self._ohlcv_partial_candle if candle_type != CandleType.FUNDING_RATE else False,
+            self._drop_incomplete_candle(candle_type),
         )
 
     def _try_build_from_websocket(
@@ -2718,11 +2853,14 @@ class Exchange:
     ) -> TypeGuard[ExchangeWS]:
         """
         Check if we can use websocket for this pair.
-        Acts as typeguard for exchangeWs
+        Acts as typeguard for exchange_ws.
+        :returns: True if the websocket can be used for the given pair, timeframe, and candle type.
         """
-        if exchange_ws and candle_type in (CandleType.SPOT, CandleType.FUTURES):
-            return True
-        return False
+        return bool(
+            exchange_ws
+            and self._has_watch_ohlcv
+            and candle_type in (CandleType.SPOT, CandleType.FUTURES)
+        )
 
     def _build_coroutine(
         self,
@@ -2733,10 +2871,9 @@ class Exchange:
         cache: bool,
     ) -> Coroutine[Any, Any, OHLCVResponse]:
         not_all_data = cache and self.required_candle_call_count > 1
-        if cache:
-            if self._can_use_websocket(self._exchange_ws, pair, timeframe, candle_type):
-                # Subscribe to websocket
-                self._exchange_ws.schedule_ohlcv(pair, timeframe, candle_type)
+        if cache and self._can_use_websocket(self._exchange_ws, pair, timeframe, candle_type):
+            # Subscribe to websocket
+            self._exchange_ws.schedule_ohlcv(pair, timeframe, candle_type)
 
         if cache and (pair, timeframe, candle_type) in self._klines:
             candle_limit = self.ohlcv_candle_limit(timeframe, candle_type)
@@ -2824,6 +2961,20 @@ class Exchange:
 
         return input_coroutines, cached_pairs
 
+    def _drop_incomplete_candle(
+        self, candle_type: CandleType, drop_incomplete: bool | None = None
+    ) -> bool:
+        """
+        Decide whether the last candle of a response is a candidate for dropping.
+        :param candle_type: Candle type of the response
+        :param drop_incomplete: Caller override. None defers to the exchange's
+            `ohlcv_partial_candle` setting.
+        """
+        if candle_type in (CandleType.FUNDING_RATE,):
+            # Never incomplete - there's nothing to drop, whatever the caller asked for.
+            return False
+        return self._ohlcv_partial_candle if drop_incomplete is None else drop_incomplete
+
     def _process_ohlcv_df(
         self,
         pair: str,
@@ -2832,22 +2983,49 @@ class Exchange:
         ticks: list[list],
         cache: bool,
         drop_incomplete: bool,
+        fetch_start_ms: int,
     ) -> DataFrame:
-        # keeping last candle time as last refreshed time of the pair
-        if ticks and cache:
-            idx = -2 if drop_incomplete and len(ticks) > 1 else -1
-            self._pairs_last_refresh_time[(pair, timeframe, c_type)] = ticks[idx][0]
+        # Open date of the candle that was forming when the fetch started.
+        # Judged against the fetch time, not the processing time - a batch may finish
+        # processing after a candle boundary
+        curr_candle_date = dt_ts(timeframe_to_prev_date(timeframe, dt_from_ts(fetch_start_ms)))
+        # Whether the newest completed candle of the response can be relied upon.
+        candles_final = bool(ticks) and self._candle_is_final(
+            ticks[-1][0], timeframe, curr_candle_date, fetch_start_ms
+        )
+        # Drop the last candle if it is the currently forming one, or if it is the just-closed
+        # candle the exchange may still update - consumers must never see an incomplete candle.
+        # Exchanges omitting candles without trades can return a completed
+        # candle as last element, which shouldn't be dropped.
+        drop_incomplete_ = (
+            drop_incomplete
+            and bool(ticks)
+            and (ticks[-1][0] >= curr_candle_date or not candles_final)
+        )
         has_cache = cache and (pair, timeframe, c_type) in self._klines
         # in case of existing cache, fill_missing happens after concatenation
         ohlcv_df = ohlcv_to_dataframe(
             ticks,
             timeframe,
             pair=pair,
-            fill_missing=not has_cache and c_type != CandleType.FUNDING_RATE,
-            drop_incomplete=drop_incomplete,
+            fill_missing=not has_cache,
+            drop_incomplete=drop_incomplete_,
+            candle_type=c_type,
         )
         # keeping parsed dataframe in cache
         if cache:
+            # Remember when this pair was last queried
+            self._pairs_last_poll_time[(pair, timeframe, c_type)] = fetch_start_ms
+            # Taken from this response, before it is merged with the cached frame.
+            if not ohlcv_df.empty:
+                self._pairs_last_refresh_time[(pair, timeframe, c_type)] = dt_ts(
+                    ohlcv_df["date"].iloc[-1].to_pydatetime()
+                )
+            elif ticks:
+                # The response held nothing but a dropped candle - remember the candle before
+                # it, so the pair is re-checked at candle cadence instead of on every iteration.
+                last_refresh = ticks[-1][0] - timeframe_to_msecs(timeframe)
+                self._pairs_last_refresh_time[(pair, timeframe, c_type)] = last_refresh
             if (pair, timeframe, c_type) in self._klines:
                 old = self._klines[(pair, timeframe, c_type)]
                 # Reassign so we return the updated, combined df
@@ -2855,8 +3033,9 @@ class Exchange:
                     concat([old, ohlcv_df], axis=0),
                     timeframe,
                     pair,
-                    fill_missing=c_type != CandleType.FUNDING_RATE,
+                    fill_missing=True,
                     drop_incomplete=False,
+                    candle_type=c_type,
                 )
                 candle_limit = self.ohlcv_candle_limit(timeframe, self._config["candle_type_def"])
                 # Age out old candles
@@ -2883,7 +3062,8 @@ class Exchange:
         :param since_ms: time since when to download, in milliseconds
         :param cache: Assign result to _klines. Useful for one-off downloads like for pairlists
         :param drop_incomplete: Control candle dropping.
-            Specifying None defaults to _ohlcv_partial_candle
+            Specifying None defaults to _ohlcv_partial_candle.
+            Candle types that are always final (e.g. funding_rate) ignore this.
         :return: Dict of [{(pair, timeframe): Dataframe}]
         """
         logger.debug("Refreshing candle (OHLCV) data for %d pairs", len(pair_list))
@@ -2898,6 +3078,7 @@ class Exchange:
             async def gather_coroutines(coro):
                 return await asyncio.gather(*coro, return_exceptions=True)
 
+            fetch_start_ms = dt_ts()
             with self._loop_lock:
                 results = self.loop.run_until_complete(gather_coroutines(dl_jobs_batch))
 
@@ -2907,9 +3088,11 @@ class Exchange:
                     continue
                 # Deconstruct tuple (has 5 elements)
                 pair, timeframe, c_type, ticks, drop_hint = res
-                drop_incomplete_ = drop_hint if drop_incomplete is None else drop_incomplete
+                drop_incomplete_ = self._drop_incomplete_candle(
+                    c_type, drop_hint if drop_incomplete is None else drop_incomplete
+                )
                 ohlcv_df = self._process_ohlcv_df(
-                    pair, timeframe, c_type, ticks, cache, drop_incomplete_
+                    pair, timeframe, c_type, ticks, cache, drop_incomplete_, fetch_start_ms
                 )
 
                 results_df[(pair, timeframe, c_type)] = ohlcv_df
@@ -2923,46 +3106,104 @@ class Exchange:
         return results_df
 
     def refresh_ohlcv_with_cache(
-        self, pairs: list[PairWithTimeframe], since_ms: int
+        self, pairs: list[PairWithTimeframe], *, lookback_period: int
     ) -> dict[PairWithTimeframe, DataFrame]:
         """
         Refresh ohlcv data for all pairs in needed_pairs if necessary.
-        Caches data with expiring per timeframe.
-        Should only be used for pairlists which need "on time" expirarion, and no longer cache.
+        Caches data per (timeframe, lookback_period), expiring with each new candle.
+        Should only be used for pairlists which need "on time" expiration, and no longer cache.
+        :param pairs: List of pairs, timeframes to refresh
+        :param lookback_period: Amount of candles to fetch.
+            Downloads lookback_period + 1 candles, as measuring a change over N candles
+            requires N + 1 candles of data.
         """
 
         timeframes = {p[1] for p in pairs}
         for timeframe in timeframes:
-            if (timeframe, since_ms) not in self._expiring_candle_cache:
+            if (timeframe, lookback_period) not in self._expiring_candle_cache:
                 timeframe_in_sec = timeframe_to_seconds(timeframe)
                 # Initialise cache
-                self._expiring_candle_cache[(timeframe, since_ms)] = PeriodicCache(
+                self._expiring_candle_cache[(timeframe, lookback_period)] = PeriodicCache(
                     ttl=timeframe_in_sec, maxsize=1000
                 )
 
         # Get candles from cache
         candles = {
-            c: self._expiring_candle_cache[(c[1], since_ms)].get(c, None)
+            c: self._expiring_candle_cache[(c[1], lookback_period)].get(c, None)
             for c in pairs
-            if c in self._expiring_candle_cache[(c[1], since_ms)]
+            if c in self._expiring_candle_cache[(c[1], lookback_period)]
         }
         pairs_to_download = [p for p in pairs if p not in candles]
-        if pairs_to_download:
-            candles_new = self.refresh_latest_ohlcv(
-                pairs_to_download, since_ms=since_ms, cache=False
-            )
+        for timeframe in timeframes:
+            tf_pairs = [p for p in pairs_to_download if p[1] == timeframe]
+            if not tf_pairs:
+                continue
+            since_ms = dt_ts(date_minus_candles(timeframe, lookback_period + 1))
+            candles_new = self.refresh_latest_ohlcv(tf_pairs, since_ms=since_ms, cache=False)
             for c, val in candles_new.items():
                 candles[c] = val
-                self._expiring_candle_cache[(c[1], since_ms)][c] = val
+                self._expiring_candle_cache[(c[1], lookback_period)][c] = val
         return candles
 
+    def _ohlcv_candle_grace_ms(self, timeframe: str) -> int:
+        """
+        Grace period after a candle close before the candle is assumed final.
+        Clamped to half a candle - a grace period at or above the timeframe would otherwise
+        withhold every candle for a full timeframe and force re-polling on every iteration.
+        """
+        return min(self._ohlcv_late_candle_grace_ms, timeframe_to_msecs(timeframe) // 2)
+
+    def _candle_is_final(
+        self, last_candle_date: int, timeframe: str, curr_candle_date: int, fetch_start_ms: int
+    ) -> bool:
+        """
+        Whether the candles of a response can be considered final.
+        The just-closed candle may still be updated by the exchange - it's only assumed to be final
+        once a newer candle was issued, or once the grace period after its close is over.
+        Judged against the fetch start time - the response can't be fresher than the request.
+        :param last_candle_date: Open date of the newest candle the exchange returned (in ms)
+        :param timeframe: timeframe of the candles
+        :param curr_candle_date: Open date of the candle forming when the fetch started (in ms)
+        :param fetch_start_ms: Time the fetch of the response was initiated (in ms)
+        """
+        if last_candle_date != (curr_candle_date - timeframe_to_msecs(timeframe)):
+            # The exchange either issued a newer candle already - or has no data for this pair
+            # since well before the last candle closed.
+            return True
+        # The just-closed candle, with no newer candle issued yet.
+        # Considered final once the grace period after its close is over.
+        return fetch_start_ms >= (curr_candle_date + self._ohlcv_candle_grace_ms(timeframe))
+
     def _now_is_time_to_refresh(self, pair: str, timeframe: str, candle_type: CandleType) -> bool:
-        # Timeframe in seconds
-        interval_in_sec = timeframe_to_msecs(timeframe)
-        plr = self._pairs_last_refresh_time.get((pair, timeframe, candle_type), 0) + interval_in_sec
+        pair_key: PairWithTimeframe = (pair, timeframe, candle_type)
+        if pair_key not in self._pairs_last_refresh_time:
+            # We don't have any candle for this pair yet.
+            return True
+        # Timeframe in milliseconds
+        interval_in_msec = timeframe_to_msecs(timeframe)
+        plr = self._pairs_last_refresh_time[pair_key] + interval_in_msec
         # current,active candle open date
         now = dt_ts(timeframe_to_prev_date(timeframe))
-        return plr < now
+        if plr >= now:
+            # The last completed candle is already cached.
+            return False
+
+        last_poll = self._pairs_last_poll_time.get(pair_key, 0)
+        if last_poll < now:
+            # Pair was not queried since the current candle opened.
+            return True
+
+        # The pair was queried within the current candle, but the exchange did not return the
+        # last completed candle. It may still be published with a slight delay - or the exchange
+        # omits candles without trades, in which case there is nothing to wait for.
+        # Keep polling until the last poll time is past the grace period.
+        if last_poll < (now + self._ohlcv_candle_grace_ms(timeframe)):
+            return True
+
+        # Beyond the grace period there's nothing more to expect within this candle.
+        # Never stay silent for longer than this, or an exchange lagging behind on a long timeframe
+        # would only be checked again once the next candle opens.
+        return dt_ts() >= (last_poll + self._ohlcv_max_poll_interval_ms)
 
     @retrier_async
     async def _async_get_candle_history(
@@ -2974,7 +3215,7 @@ class Exchange:
     ) -> OHLCVResponse:
         """
         Asynchronously get candle history data using fetch_ohlcv
-        :param candle_type: '', mark, index, premiumIndex, or funding_rate
+        :param candle_type: Candle type to use (spot, futures, funding_rate, ...)
         returns tuple: (pair, timeframe, ohlcv_list)
         """
         try:
@@ -2993,20 +3234,26 @@ class Exchange:
                 timeframe, candle_type=candle_type, since_ms=since_ms
             )
 
-            if candle_type != CandleType.FUNDING_RATE:
-                if candle_type and candle_type not in (CandleType.SPOT, CandleType.FUTURES):
-                    self.verify_candle_type_support(candle_type)
-                    params.update({"price": str(candle_type)})
-                data = await self._api_async.fetch_ohlcv(
-                    pair, timeframe=timeframe, since=since_ms, limit=candle_limit, params=params
-                )
-            else:
-                # Funding rate
+            if candle_type == CandleType.FUNDING_RATE:
                 data = await self._fetch_funding_rate_history(
                     pair=pair,
                     timeframe=timeframe,
                     limit=candle_limit,
                     since_ms=since_ms,
+                )
+            elif candle_type == CandleType.OPEN_INTEREST:
+                data = await self._fetch_open_interest_history(
+                    pair=pair,
+                    timeframe=timeframe,
+                    limit=candle_limit,
+                    since_ms=since_ms,
+                )
+            else:
+                if candle_type and candle_type not in (CandleType.SPOT, CandleType.FUTURES):
+                    self.verify_candle_type_support(candle_type)
+                    params.update({"price": str(candle_type)})
+                data = await self._api_async.fetch_ohlcv(
+                    pair, timeframe=timeframe, since=since_ms, limit=candle_limit, params=params
                 )
             # Some exchanges sort OHLCV in ASC order and others in DESC.
             # Only sort if necessary to save computing time
@@ -3015,15 +3262,14 @@ class Exchange:
                     data = sorted(data, key=lambda x: x[0])
             except IndexError:
                 logger.exception("Error loading %s. Result was %s.", pair, data)
-                return pair, timeframe, candle_type, [], self._ohlcv_partial_candle
+                return pair, timeframe, candle_type, [], self._drop_incomplete_candle(candle_type)
             logger.debug("Done fetching pair %s, %s interval %s...", pair, candle_type, timeframe)
             return (
                 pair,
                 timeframe,
                 candle_type,
                 data,
-                # funding_rates are always complete, so never need to be dropped.
-                self._ohlcv_partial_candle if candle_type != CandleType.FUNDING_RATE else False,
+                self._drop_incomplete_candle(candle_type),
             )
 
         except ccxt.NotSupported as e:
@@ -3057,9 +3303,25 @@ class Exchange:
         """
         # Funding rate
         data = await self._api_async.fetch_funding_rate_history(pair, since=since_ms, limit=limit)
-        # Convert funding rate to candle pattern
-        data = [[x["timestamp"], x["fundingRate"], 0, 0, 0, 0] for x in data]
+        # Reduce to the columns stored for funding rates (date, funding_rate)
+        data = [[x["timestamp"], x["fundingRate"]] for x in data]
         return data
+
+    async def _fetch_open_interest_history(
+        self,
+        pair: str,
+        timeframe: str,
+        limit: int,
+        since_ms: int | None = None,
+    ) -> list[list]:
+        """
+        Fetch open interest history - used to selectively override this by subclasses.
+        """
+        data = await self._api_async.fetch_open_interest_history(
+            pair, timeframe, since=since_ms, limit=limit
+        )
+        data_res = [[x["timestamp"], x["openInterestAmount"], x["openInterestValue"]] for x in data]
+        return data_res
 
     def check_candle_type_support(self, candle_type: CandleType) -> bool:
         """
@@ -3067,20 +3329,16 @@ class Exchange:
         :param candle_type: CandleType to verify
         :return: True if supported, False otherwise
         """
-        if candle_type == CandleType.FUNDING_RATE:
-            if not self.exchange_has("fetchFundingRateHistory"):
-                return False
-        elif candle_type not in (CandleType.SPOT, CandleType.FUTURES):
-            mapping = {
-                CandleType.MARK: "fetchMarkOHLCV",
-                CandleType.INDEX: "fetchIndexOHLCV",
-                CandleType.PREMIUMINDEX: "fetchPremiumIndexOHLCV",
-                CandleType.FUNDING_RATE: "fetchFundingRateHistory",
-            }
-            _method = mapping.get(candle_type, "fetchOHLCV")
-            if not self.exchange_has(_method):
-                return False
-        return True
+        if candle_type in (CandleType.SPOT, CandleType.FUTURES):
+            return True
+        mapping = {
+            CandleType.MARK: "fetchMarkOHLCV",
+            CandleType.INDEX: "fetchIndexOHLCV",
+            CandleType.PREMIUMINDEX: "fetchPremiumIndexOHLCV",
+            CandleType.FUNDING_RATE: "fetchFundingRateHistory",
+            CandleType.OPEN_INTEREST: "fetchOpenInterestHistory",
+        }
+        return self.exchange_has(mapping.get(candle_type, "fetchOHLCV"))
 
     def verify_candle_type_support(self, candle_type: CandleType) -> None:
         """
@@ -3523,12 +3781,29 @@ class Exchange:
         if type(since) is datetime:
             since = dt_ts(since)
 
+        limit = self._ft_has["funding_history_limit"]
         try:
-            funding_history = self._api.fetch_funding_history(symbol=pair, since=since)
-            self._log_exchange_response(
-                "funding_history", funding_history, add_info=f"pair: {pair}, since: {since}"
-            )
-            return sum(fee["amount"] for fee in funding_history)
+            # One funding payment per timestamp - not all exchanges provide an id.
+            funding_history: dict[int, float] = {}
+            while True:
+                page = self._api.fetch_funding_history(symbol=pair, since=since, limit=limit)
+                self._log_exchange_response(
+                    "funding_history", page, add_info=f"pair: {pair}, since: {since}"
+                )
+                new_entries = {
+                    fee["timestamp"]: fee["amount"]
+                    for fee in page
+                    if fee["timestamp"] not in funding_history
+                }
+                if not new_entries:
+                    # Empty page, or the exchange ignored since and repeated known entries
+                    break
+                funding_history.update(new_entries)
+                if limit and len(page) < limit:
+                    break
+                # Responses are capped in size - continue after the newest entry received.
+                since = max(new_entries) + 1
+            return sum(funding_history.values())
         except ccxt.DDoSProtection as e:
             raise DDosProtection(e) from e
         except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
@@ -3575,15 +3850,13 @@ class Exchange:
             elif self.exchange_has("fetchMarketLeverageTiers"):
                 # Must fetch the leverage tiers for each market separately
                 # * This is slow(~45s) on Okx, makes ~90 api calls to load all linear swap markets
-                markets = self.markets
-
                 symbols = [
                     symbol
-                    for symbol, market in markets.items()
-                    if (
-                        self.market_is_future(market)
-                        and market["quote"] == self._config["stake_currency"]
-                    )
+                    for symbol, _ in self.get_markets(
+                        quote_currencies=[self._config["stake_currency"]],
+                        futures_only=True,
+                        active_only=True,
+                    ).items()
                 ]
 
                 tiers: dict[str, list[dict]] = {}
@@ -3924,29 +4197,27 @@ class Exchange:
         :param futures_funding_rate: Fake funding rate to use if funding_rates are not available
         """
         relevant_cols = ["date", "open_mark", "open_fund"]
+        # Reduce both sides to the columns we need, under explicit names. Funding rates are
+        # stored as "funding_rate" but older in-memory frames may still use the "open" alias.
+        fund_col = "funding_rate" if "funding_rate" in funding_rates.columns else "open"
+        funding_rates = funding_rates.loc[:, ["date", fund_col]].rename(
+            columns={fund_col: "open_fund"}
+        )
+        mark_rates = mark_rates.rename(columns={"open": "open_mark"})
+
         if futures_funding_rate is None:
-            return mark_rates.merge(
-                funding_rates, on="date", how="inner", suffixes=["_mark", "_fund"]
-            )[relevant_cols]
+            return Exchange._add_funding_columns(
+                mark_rates.merge(funding_rates, on="date", how="inner")[relevant_cols]
+            )
         else:
             if len(funding_rates) == 0:
                 # No funding rate candles - full fillup with fallback variable
                 mark_rates["open_fund"] = futures_funding_rate
-                return mark_rates.rename(
-                    columns={
-                        "open": "open_mark",
-                        "close": "close_mark",
-                        "high": "high_mark",
-                        "low": "low_mark",
-                        "volume": "volume_mark",
-                    }
-                )[relevant_cols]
+                return Exchange._add_funding_columns(mark_rates[relevant_cols])
 
             else:
                 # Fill up missing funding_rate candles with fallback value
-                combined = mark_rates.merge(
-                    funding_rates, on="date", how="left", suffixes=["_mark", "_fund"]
-                )
+                combined = mark_rates.merge(funding_rates, on="date", how="left")
                 # Fill only leading missing funding rates so gaps stay untouched
                 first_valid_idx = combined["open_fund"].first_valid_index()
                 if first_valid_idx is None:
@@ -3956,7 +4227,25 @@ class Exchange:
                         "open_fund"
                     ].isna()
                     combined.loc[is_leading_na, "open_fund"] = futures_funding_rate
-                return combined[relevant_cols].dropna()
+                return Exchange._add_funding_columns(combined[relevant_cols].dropna())
+
+    @staticmethod
+    def _add_funding_columns(df: DataFrame) -> DataFrame:
+        """
+        Add the two columns calculate_funding_fees needs, so the per-call work is a
+        slice and a sum rather than re-deriving them from the frame every time.
+        Backtesting builds one frame per pair and reuses it for every
+        call; dry-run builds one per call - both go through here.
+        """
+        dates = df["date"]
+        if df.empty:
+            # short-circuits on empty frames.
+            return df
+        # Epoch nanoseconds, so open/close dates compare directly against Timestamp.value
+        # without having to be rounded to the column's resolution first.
+        df["_ff_date_ns"] = dates.dt.as_unit("ns").astype("int64")
+        df["_ff_fee_per_unit"] = df["open_fund"] * df["open_mark"]
+        return df
 
     def calculate_funding_fees(
         self,
@@ -3978,15 +4267,19 @@ class Exchange:
         fees: float = 0
 
         if not df.empty:
-            dates = df["date"]
-            unit = dates.dtype.unit
-            # Timestamps must be converted to column unit for dry/live mode
-            # where open/close dates can have microsecond precision - but the column may not have
-            # that precision.
-            lo = Timestamp(open_date).ceil(unit).as_unit(unit)
-            hi = Timestamp(close_date).floor(unit).as_unit(unit)
-            df1 = df.iloc[dates.searchsorted(lo, "left") : dates.searchsorted(hi, "right")]
-            fees = sum(df1["open_fund"] * df1["open_mark"] * amount)
+            if "_ff_fee_per_unit" not in df.columns:
+                # Frame not built by combine_funding_and_mark - derive them now.
+                # Safety check - should never happen in practice.
+                df = self._add_funding_columns(df)
+            dates = df["_ff_date_ns"].to_numpy()
+            fee_per_unit = df["_ff_fee_per_unit"].to_numpy()
+            # Comparing in nanoseconds handles dry/live mode, where open/close dates can carry
+            # more precision than the funding candles themselves.
+            first = dates.searchsorted(Timestamp(open_date).value, "left")
+            last = dates.searchsorted(Timestamp(close_date).value, "right")
+            # .tolist() is load-bearing: CPython's sum() applies compensated summation to
+            # exact floats, but not to the numpy scalars a bare ndarray would yield.
+            fees = sum((fee_per_unit[first:last] * amount).tolist())
         if isnan(fees):
             fees = 0.0
         # Negate fees for longs as funding_fees expects it this way based on live endpoints.

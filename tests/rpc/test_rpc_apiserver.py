@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from typing import get_args
 from unittest.mock import ANY, MagicMock, PropertyMock, patch
 from zipfile import ZipFile
 
@@ -18,6 +19,7 @@ import rapidjson
 import uvicorn
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.exceptions import HTTPException
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from requests.auth import _basic_auth_str
 from sqlalchemy import select
@@ -36,8 +38,10 @@ from freqtrade.persistence import CustomDataWrapper, Trade
 from freqtrade.rpc import RPC
 from freqtrade.rpc.api_server import ApiServer
 from freqtrade.rpc.api_server.api_auth import create_token, get_user_from_token
+from freqtrade.rpc.api_server.api_schemas import StrategyName
 from freqtrade.rpc.api_server.uvicorn_threaded import UvicornServer
 from freqtrade.rpc.api_server.webserver_bgwork import ApiBG
+from freqtrade.strategy.hyper import HyperStrategyMixin
 from freqtrade.util.datetime_helpers import format_date
 from tests.conftest import (
     CURRENT_TEST_STRATEGY,
@@ -45,7 +49,6 @@ from tests.conftest import (
     create_mock_trades,
     create_mock_trades_usdt,
     generate_test_data,
-    get_mock_coro,
     get_patched_freqtradebot,
     log_has,
     log_has_re,
@@ -388,9 +391,7 @@ def test_api_UvicornServer(mocker):
 
 
 def test_api_UvicornServer_run(mocker):
-    serve_mock = mocker.patch(
-        "freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
-    )
+    serve_mock = mocker.patch("freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve")
     s = UvicornServer(uvicorn.Config(MagicMock(), port=8080, host="127.0.0.1"))
     assert serve_mock.call_count == 0
 
@@ -401,9 +402,7 @@ def test_api_UvicornServer_run(mocker):
 
 
 def test_api_UvicornServer_run_no_uvloop(mocker, import_fails):
-    serve_mock = mocker.patch(
-        "freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
-    )
+    serve_mock = mocker.patch("freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve")
     asyncio.set_event_loop(asyncio.new_event_loop())
     s = UvicornServer(uvicorn.Config(MagicMock(), port=8080, host="127.0.0.1"))
     assert serve_mock.call_count == 0
@@ -703,7 +702,17 @@ def test_api_show_config(botclient):
     assert "unfilledtimeout" in response
     assert "version" in response
     assert "api_version" in response
+    assert "proxy_coin" not in response
     assert 2.1 <= response["api_version"] < 3.0
+
+    # proxy_coin is only set when available
+    ftbot.config["proxy_coin"] = "BNFCR"
+    ftbot.config["trading_mode"] = "futures"
+    ftbot.config["margin_mode"] = "cross"
+
+    rc = client_get(client, f"{BASE_URI}/show_config")
+    response1 = rc.json()
+    assert response1["proxy_coin"] == "BNFCR"
 
 
 def test_api_daily(botclient, mocker, ticker, fee, markets):
@@ -902,13 +911,88 @@ def test_api_custom_data_single_trade(botclient, fee):
     assert_response(rc, 200)
 
     # CASE 3 Checking specific not existing key custom data of trade 1
-    rc = client_get(client, f"{BASE_URI}/trades/1/custom-data&key=test")
-    assert_response(rc, 404)
+    rc = client_get(client, f"{BASE_URI}/trades/1/custom-data?key=test")
+    assert_response(rc)
+    assert rc.json() == []
 
     # CASE 4 Trying to get custom-data from not existing trade
     rc = client_get(client, f"{BASE_URI}/trades/13/custom-data")
     assert_response(rc, 404)
     assert rc.json()["detail"] == "No trade found for trade_id: 13"
+
+
+@pytest.mark.usefixtures("init_persistence")
+@pytest.mark.parametrize("key", [None, "test_str"], ids=["empty-trade", "missing-key"])
+def test_api_custom_data_open_trades_first_trade_no_matching_data(botclient, fee, key):
+    _, client = botclient
+    create_mock_trades_usdt(fee, use_db=True)
+    open_trades = sorted(Trade.get_trades_proxy(is_open=True), key=lambda trade: trade.id)
+    first_trade, second_trade = open_trades[:2]
+
+    assert first_trade.get_all_custom_data() == []
+    if key is not None:
+        first_trade.set_custom_data("other_key", "other_value")
+        assert first_trade.get_custom_data("other_key") == "other_value"
+        assert first_trade.get_custom_data_entry(key) is None
+    second_trade.set_custom_data("test_str", "test_value")
+
+    query = f"?key={key}" if key is not None else ""
+    rc = client_get(client, f"{BASE_URI}/trades/open/custom-data{query}")
+    assert_response(rc)
+    assert rc.json() == [
+        {
+            "trade_id": second_trade.id,
+            "custom_data": [
+                {
+                    "key": "test_str",
+                    "type": "str",
+                    "value": "test_value",
+                    "created_at": ANY,
+                    "updated_at": None,
+                }
+            ],
+        }
+    ]
+
+
+@pytest.mark.usefixtures("init_persistence")
+@pytest.mark.parametrize("trade_id", [1, "open"])
+def test_api_custom_data_empty(botclient, fee, trade_id):
+    _, client = botclient
+    create_mock_trades_usdt(fee, use_db=True)
+
+    rc = client_get(client, f"{BASE_URI}/trades/{trade_id}/custom-data")
+    assert_response(rc)
+    assert rc.json() == []
+
+
+@pytest.mark.usefixtures("init_persistence")
+@pytest.mark.parametrize("empty_page", [False, True], ids=["no-open-trades", "past-last-page"])
+def test_api_custom_data_open_trades_empty_page(botclient, fee, empty_page):
+    _, client = botclient
+    offset = 0
+    if empty_page:
+        create_mock_trades_usdt(fee, use_db=True)
+        open_trades = Trade.get_trades_proxy(is_open=True)
+        for trade in open_trades:
+            trade.set_custom_data("test_str", "test_value")
+        offset = len(open_trades)
+
+    rc = client_get(client, f"{BASE_URI}/trades/open/custom-data?offset={offset}")
+    assert_response(rc)
+    assert rc.json() == []
+
+
+@pytest.mark.usefixtures("init_persistence")
+def test_api_custom_data_open_trades_missing_key(botclient, fee):
+    _, client = botclient
+    create_mock_trades_usdt(fee, use_db=True)
+    for trade in Trade.get_trades_proxy(is_open=True):
+        trade.set_custom_data("other_key", "other_value")
+
+    rc = client_get(client, f"{BASE_URI}/trades/open/custom-data?key=missing_key")
+    assert_response(rc)
+    assert rc.json() == []
 
 
 @pytest.mark.usefixtures("init_persistence")
@@ -2509,6 +2593,53 @@ def test_api_pair_history(botclient, tmp_path, mocker):
         )
         lfm.reset_mock()
 
+    observed_param_values = []
+    original_set_param = HyperStrategyMixin._ft_set_param
+
+    def ft_set_param_spy(self, params, param_values, space, hyperopt=False):
+        # Custom spy for simplicity
+        observed_param_values.append((space, dict(param_values)))
+        return original_set_param(self, params, param_values, space, hyperopt)
+
+    mocker.patch.object(HyperStrategyMixin, "_ft_set_param", new=ft_set_param_spy)
+
+    rc = client_post(
+        client,
+        f"{BASE_URI}/pair_history",
+        data={
+            "pair": "UNITTEST/BTC",
+            "timeframe": timeframe,
+            "timerange": "20180111-20180112",
+            "strategy": CURRENT_TEST_STRATEGY,
+            "strategy_params": [
+                {"name": "buy_rsi", "space": "buy", "param_type": "IntParameter", "value": 21},
+            ],
+        },
+    )
+    assert_response(rc, 200)
+    assert any(
+        space == "buy" and param_values.get("buy_rsi") == 21
+        for space, param_values in observed_param_values
+    )
+
+    # Invalid overrides are rejected, not silently skipped
+    rc = client_post(
+        client,
+        f"{BASE_URI}/pair_history",
+        data={
+            "pair": "UNITTEST/BTC",
+            "timeframe": timeframe,
+            "timerange": "20180111-20180112",
+            "strategy": CURRENT_TEST_STRATEGY,
+            "strategy_params": [
+                # buy_plusdi is a RealParameter
+                {"name": "buy_plusdi", "space": "buy", "param_type": "IntParameter", "value": 99},
+            ],
+        },
+    )
+    assert_response(rc, 400)
+    assert "Invalid strategy parameter override: 'buy_plusdi'" in rc.json()["detail"]
+
     # No strategy
     rc = client_post(
         client,
@@ -2545,7 +2676,7 @@ def test_api_pair_history(botclient, tmp_path, mocker):
         },
     )
     assert_response(rc, 422)
-    assert rc.json()["detail"] == "base64 encoded strategies are not allowed."
+    assert rc.json()["detail"][0]["msg"] == "base64 encoded strategies are not allowed."
 
     # Disallow base64 strategies
     rc = client_get(
@@ -2554,7 +2685,7 @@ def test_api_pair_history(botclient, tmp_path, mocker):
         f"&timerange=20200111-20200112&strategy={base64_dummy}",
     )
     assert_response(rc, 422)
-    assert rc.json()["detail"] == "base64 encoded strategies are not allowed."
+    assert rc.json()["detail"][0]["msg"] == "base64 encoded strategies are not allowed."
 
 
 def test_api_pair_history_live_mode(botclient, tmp_path, mocker):
@@ -2674,6 +2805,7 @@ def test_api_strategies(botclient, tmp_path):
         "strategies": [
             "HyperoptableStrategy",
             "HyperoptableStrategyV2",
+            "InformativeDecoratorCacheTest",
             "InformativeDecoratorTest",
             "StrategyTestV2",
             "StrategyTestV3",
@@ -2741,6 +2873,7 @@ def test_api_strategy(botclient, tmp_path, mocker):
     # Disallow base64 strategies
     rc = client_get(client, f"{BASE_URI}/strategy/xx:cHJpbnQoImhlbGxvIHdvcmxkIik=")
     assert_response(rc, 422)
+    assert rc.json()["detail"][0]["msg"] == "base64 encoded strategies are not allowed."
     mocker.patch(
         "freqtrade.resolvers.strategy_resolver.StrategyResolver._load_strategy",
         side_effect=Exception("Test"),
@@ -3190,6 +3323,14 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
     try:
         ftbot, client = botclient
         mocker.patch(f"{EXMS}.get_fee", fee)
+        observed_param_values = []
+        original_set_param = HyperStrategyMixin._ft_set_param
+
+        def ft_set_param_spy(self, params, param_values, space, hyperopt=False):
+            observed_param_values.append((space, dict(param_values)))
+            return original_set_param(self, params, param_values, space, hyperopt)
+
+        mocker.patch.object(HyperStrategyMixin, "_ft_set_param", new=ft_set_param_spy)
 
         rc = client_get(client, f"{BASE_URI}/backtest")
         # Backtest prevented in default mode
@@ -3229,6 +3370,9 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
             "stake_amount": 100,
             "dry_run_wallet": 1000,
             "enable_protections": False,
+            "strategy_params": [
+                {"name": "buy_rsi", "space": "buy", "param_type": "IntParameter", "value": 22},
+            ],
         }
         rc = client_post(client, f"{BASE_URI}/backtest", data=data)
         assert_response(rc)
@@ -3248,6 +3392,10 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
         assert result["status_msg"] == "Backtest ended"
         assert result["progress"] == 1
         assert result["backtest_result"]
+        assert any(
+            space == "buy" and param_values.get("buy_rsi") == 22
+            for space, param_values in observed_param_values
+        )
 
         rc = client_get(client, f"{BASE_URI}/backtest/abort")
         assert_response(rc)
@@ -3311,6 +3459,31 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
         rc = client_post(client, f"{BASE_URI}/backtest", data=data)
         assert log_has("Backtesting caused an error: DeadBeef", caplog)
 
+        rc = client_get(client, f"{BASE_URI}/backtest")
+        assert_response(rc)
+        result = rc.json()
+        assert result["status"] == "error"
+        assert "Backtest failed" in result["status_msg"]
+
+        # Invalid parameter overrides fail the backtest instead of being skipped
+        data["stake_amount"] = 103
+        data["strategy_params"] = [
+            # sell_minusdi has load=False
+            {
+                "name": "sell_minusdi",
+                "space": "sell",
+                "param_type": "DecimalParameter",
+                "value": 0.7,
+            }
+        ]
+        rc = client_post(client, f"{BASE_URI}/backtest", data=data)
+        assert_response(rc)
+        assert log_has(
+            "Backtesting encountered a configuration Error: "
+            "Invalid strategy parameter override: "
+            "'sell_minusdi' is not loaded (load=False).",
+            caplog,
+        )
         rc = client_get(client, f"{BASE_URI}/backtest")
         assert_response(rc)
         result = rc.json()
@@ -3655,6 +3828,13 @@ def test_channel_reader_handles_freqtrade_exception(botclient):
 
 
 def test_api_ws_send_msg(default_conf, mocker, caplog):
+
+    def wait_for_waiter(waiter, timeout: float = 0.5):
+        for _ in range(int(timeout / 0.01)):
+            if waiter.done():
+                return
+            time.sleep(0.01)
+
     try:
         caplog.set_level(logging.DEBUG)
 
@@ -3682,11 +3862,16 @@ def test_api_ws_send_msg(default_conf, mocker, caplog):
             test_message = {"type": "status", "data": "test"}
             first_waiter = apiserver._message_stream._waiter
             apiserver.send_msg(test_message)
+            # Publishing from a foreign thread is handed over to the server's event loop
+            wait_for_waiter(first_waiter)
             assert first_waiter.result()[0] == test_message
 
             second_waiter = apiserver._message_stream._waiter
-            apiserver.send_msg(test_message)
             assert first_waiter != second_waiter
+            test_message2 = {"type": "status", "data": "test2"}
+            apiserver.send_msg(test_message2)
+            wait_for_waiter(second_waiter)
+            assert second_waiter.result()[0] == test_message2
 
     finally:
         ApiServer.shutdown()
@@ -3967,3 +4152,180 @@ def test_api_markets_webserver(botclient):
 
     assert "hyperliquid_spot" in ApiBG.exchanges
     assert "binance_spot" in ApiBG.exchanges
+
+
+def test_api_backtest_pair_history(botclient, tmp_path: Path, mocker):
+    ftbot, client = botclient
+    ftbot.config["user_data_dir"] = tmp_path
+    ftbot.config["runmode"] = RunMode.WEBSERVER
+    bt_results_base = tmp_path / "backtest_results"
+    bt_results_base.mkdir()
+    from freqtrade.optimize.optimize_reports import store_backtest_results
+
+    orig_file = Path(__file__).parent.parent / "strategy" / "strats" / "strategy_test_v3.py"
+    # Mark the archived strategy, to tell it apart from the one in the strategy directory.
+    strategy_file = bt_results_base.parent / "strategy_test_v3.py"
+    strategy_file.write_text(
+        orig_file.read_text(encoding="utf-8").replace(
+            'dataframe["adx"] = ta.ADX(dataframe)',
+            'dataframe["adx"] = ta.ADX(dataframe)\n        dataframe["from_zip"] = 1',
+        ),
+        encoding="utf-8",
+    )
+    meta = {
+        "run_id": "testrun",
+        "backtest_start_time": 1515628800,
+        "timeframe": "5m",
+        # 2018-01-11 - 2018-01-12
+        "backtest_start_ts": 1515628800,
+        "backtest_end_ts": 1515715200,
+    }
+    dtappendix = f"2018_01_12_00_00_{len(list(bt_results_base.glob('*.zip'))):02d}"
+    store_backtest_results(
+        {"exportdirectory": bt_results_base, "original_config": {}},
+        {"metadata": {CURRENT_TEST_STRATEGY: meta}, "strategy": {}, "strategy_comparison": []},
+        dtappendix,
+        strategy_files={CURRENT_TEST_STRATEGY: str(strategy_file)},
+        strategy_params={CURRENT_TEST_STRATEGY: {"buy": {"buy_rsi": 21}}},
+    )
+    fn = f"backtest-result-{dtappendix}"
+
+    url = f"{BASE_URI}/backtest/history/{fn}/{CURRENT_TEST_STRATEGY}/pair_history"
+
+    observed_param_values = []
+    original_set_param = HyperStrategyMixin._ft_set_param
+
+    def ft_set_param_spy(self, params, param_values, space, hyperopt=False):
+        observed_param_values.append((space, dict(param_values)))
+        return original_set_param(self, params, param_values, space, hyperopt)
+
+    mocker.patch.object(HyperStrategyMixin, "_ft_set_param", new=ft_set_param_spy)
+
+    rc = client_post(client, url, data={"pair": "UNITTEST/BTC", "columns": ["rsi", "buy_rsi"]})
+    assert_response(rc, 200)
+    result = rc.json()
+    assert result["strategy"] == CURRENT_TEST_STRATEGY
+    # Timeframe and timerange default to the ones the backtest ran with
+    assert result["timeframe"] == "5m"
+    assert result["length"] == 289
+    # The strategy stored in the zip is used, not the one in the strategy directory
+    assert "from_zip" in result["all_columns"]
+    # Parameters stored in the zip are used, too
+    assert any(
+        space == "buy" and param_values.get("buy_rsi") == 21
+        for space, param_values in observed_param_values
+    )
+
+    # Explicit timerange overrides the backtest timerange
+    rc = client_post(
+        client, url, data={"pair": "UNITTEST/BTC", "timerange": "20180111-20180111T1200"}
+    )
+    assert_response(rc, 200)
+    assert rc.json()["length"] == 145
+
+    # Nonexistent file - fails "is_file_in_dir" check
+    rc = client_post(
+        client,
+        f"{BASE_URI}/backtest/history/randomFile/{CURRENT_TEST_STRATEGY}/pair_history",
+        data={"pair": "UNITTEST/BTC"},
+    )
+    assert_response(rc, 404)
+    assert rc.json()["detail"] == "File not found."
+
+    # Strategy not part of this backtest
+    rc = client_post(
+        client,
+        f"{BASE_URI}/backtest/history/{fn}/OtherStrategy/pair_history",
+        data={"pair": "UNITTEST/BTC"},
+    )
+    assert_response(rc, 404)
+    assert "OtherStrategy not found" in rc.json()["detail"]
+
+    # Invalid timerange is a client error
+    rc = client_post(client, url, data={"pair": "UNITTEST/BTC", "timerange": "2018-01-11"})
+    assert_response(rc, 400)
+
+    # Result without an archived strategy cannot be replayed
+    dtappendix = f"2018_01_12_00_00_{len(list(bt_results_base.glob('*.zip'))):02d}"
+    store_backtest_results(
+        {"exportdirectory": bt_results_base, "original_config": {}},
+        {"metadata": {CURRENT_TEST_STRATEGY: meta}, "strategy": {}, "strategy_comparison": []},
+        dtappendix,
+    )
+    rc = client_post(
+        client,
+        f"{BASE_URI}/backtest/history/backtest-result-{dtappendix}/{CURRENT_TEST_STRATEGY}"
+        "/pair_history",
+        data={"pair": "UNITTEST/BTC"},
+    )
+    assert_response(rc, 422)
+    assert "cannot be replayed" in rc.json()["detail"]
+
+
+_STRATEGY_VALIDATOR = get_args(StrategyName)[1]
+
+
+def _iter_api_routes(routes):
+    """Walk the route tree - included routers are wrapped, so recurse into them."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        else:
+            yield from _iter_api_routes(
+                getattr(route, "routes", None)
+                or getattr(getattr(route, "original_router", None), "routes", [])
+            )
+
+
+def _iter_dependants(dependant):
+    """An endpoint's own parameters, plus those of every sub-dependency."""
+    yield dependant
+    for sub in dependant.dependencies:
+        yield from _iter_dependants(sub)
+
+
+def _uses_strategy_name(annotation) -> bool:
+    """Whether `annotation` carries the StrategyName validator - also inside `| None`."""
+    if annotation is _STRATEGY_VALIDATOR:
+        return True
+    return any(_uses_strategy_name(arg) for arg in get_args(annotation))
+
+
+def _untyped_strategy(name, annotation, metadata=(), seen=frozenset()) -> bool:
+    """Whether this parameter - or a payload model nested in it - takes a plain strategy."""
+    if name == "strategy":
+        # pydantic keeps the validator in `metadata` for a required field,
+        # but inside the annotation itself for an optional one.
+        return not (_uses_strategy_name(annotation) or _STRATEGY_VALIDATOR in metadata)
+    if (fields := getattr(annotation, "model_fields", None)) and annotation not in seen:
+        seen = seen | {annotation}
+        return any(_untyped_strategy(n, f.annotation, f.metadata, seen) for n, f in fields.items())
+    return any(_untyped_strategy(name, arg, (), seen) for arg in get_args(annotation))
+
+
+def test_api_strategy_name_typed(botclient):
+    """
+    Every strategy name the API accepts must be a StrategyName, never a plain str - a
+    plain one lets a caller smuggle in a base64 encoded strategy. Covers path, query,
+    header, cookie and body parameters, nested payload models and sub-dependencies.
+    A strategy arriving under some other parameter name is not seen.
+    """
+    _ftbot, client = botclient
+
+    untyped = {
+        route.path
+        for route in _iter_api_routes(client.app.routes)
+        for dep in _iter_dependants(route.dependant)
+        for f in (
+            *dep.path_params,
+            *dep.query_params,
+            *dep.header_params,
+            *dep.cookie_params,
+            *dep.body_params,
+        )
+        if _untyped_strategy(f.name, f.field_info.annotation, f.field_info.metadata)
+    }
+    assert not untyped, (
+        f"Unvalidated strategy name on {sorted(untyped)} - annotate the parameter or "
+        f"payload field with StrategyName."
+    )

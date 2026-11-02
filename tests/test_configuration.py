@@ -1,10 +1,12 @@
 # pragma pylint: disable=missing-docstring, protected-access, invalid-name
 import json
+import re
 import warnings
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import ccxt
 import pytest
 
 from freqtrade.commands import Arguments
@@ -169,7 +171,7 @@ def test_load_config_max_open_trades_zero(default_conf, mocker, caplog) -> None:
 def test_load_config_combine_dicts(default_conf, mocker, caplog) -> None:
     conf1 = deepcopy(default_conf)
     conf2 = deepcopy(default_conf)
-    del conf1["exchange"]["key"]
+    del conf1["exchange"]["api_key"]
     del conf1["exchange"]["secret"]
     del conf2["exchange"]["name"]
     conf2["exchange"]["pair_whitelist"] += ["NANO/BTC"]
@@ -192,7 +194,7 @@ def test_load_config_combine_dicts(default_conf, mocker, caplog) -> None:
 
     exchange_conf = default_conf["exchange"]
     assert validated_conf["exchange"]["name"] == exchange_conf["name"]
-    assert validated_conf["exchange"]["key"] == exchange_conf["key"]
+    assert validated_conf["exchange"]["api_key"] == exchange_conf["api_key"]
     assert validated_conf["exchange"]["secret"] == exchange_conf["secret"]
     assert validated_conf["exchange"]["pair_whitelist"] != conf1["exchange"]["pair_whitelist"]
     assert validated_conf["exchange"]["pair_whitelist"] == conf2["exchange"]["pair_whitelist"]
@@ -203,7 +205,7 @@ def test_load_config_combine_dicts(default_conf, mocker, caplog) -> None:
 def test_from_config(default_conf, mocker, caplog) -> None:
     conf1 = deepcopy(default_conf)
     conf2 = deepcopy(default_conf)
-    del conf1["exchange"]["key"]
+    del conf1["exchange"]["api_key"]
     del conf1["exchange"]["secret"]
     del conf2["exchange"]["name"]
     conf2["exchange"]["pair_whitelist"] += ["NANO/BTC"]
@@ -218,7 +220,7 @@ def test_from_config(default_conf, mocker, caplog) -> None:
 
     exchange_conf = default_conf["exchange"]
     assert validated_conf["exchange"]["name"] == exchange_conf["name"]
-    assert validated_conf["exchange"]["key"] == exchange_conf["key"]
+    assert validated_conf["exchange"]["api_key"] == exchange_conf["api_key"]
     assert validated_conf["exchange"]["secret"] == exchange_conf["secret"]
     assert validated_conf["exchange"]["pair_whitelist"] != conf1["exchange"]["pair_whitelist"]
     assert validated_conf["exchange"]["pair_whitelist"] == conf2["exchange"]["pair_whitelist"]
@@ -1116,31 +1118,28 @@ def test_load_config_stoploss_exchange_limit_ratio(all_conf) -> None:
 
 
 @pytest.mark.parametrize(
-    "keys",
+    "base,key,expected",
     [
-        ("exchange", "key", ""),
-        ("exchange", "secret", ""),
-        ("exchange", "password", ""),
+        ("exchange", "secret", None),
+        ("exchange", "password", None),
     ],
 )
-def test_load_config_default_subkeys(all_conf, keys) -> None:
+def test_load_config_default_subkeys(all_conf, base, key, expected) -> None:
     """
     Test for parameters with default values in sub-paths
     so they can be omitted in the config and the default value
     should is added to the config.
     """
-    # Get first level key
-    key = keys[0]
     # get second level key
-    subkey = keys[1]
+    subkey = key
 
-    del all_conf[key][subkey]
+    del all_conf[base][subkey]
 
-    assert subkey not in all_conf[key]
+    assert subkey not in all_conf[base]
 
     validate_config_schema(all_conf)
-    assert subkey in all_conf[key]
-    assert all_conf[key][subkey] == keys[2]
+    assert subkey in all_conf[base]
+    assert all_conf[base][subkey] == expected
 
 
 def test_pairlist_resolving():
@@ -1593,31 +1592,110 @@ def test_setup_freqai_backtesting(mocker, default_conf) -> None:
 
 
 def test_sanitize_config(default_conf_usdt):
-    assert default_conf_usdt["exchange"]["key"] != "REDACTED"
+    assert default_conf_usdt["exchange"]["api_key"] != "REDACTED"
     res = sanitize_config(default_conf_usdt)
     # Didn't modify original dict
-    assert default_conf_usdt["exchange"]["key"] != "REDACTED"
+    assert default_conf_usdt["exchange"]["api_key"] != "REDACTED"
     assert "accountId" not in default_conf_usdt["exchange"]
 
-    assert res["exchange"]["key"] == "REDACTED"
+    assert res["exchange"]["api_key"] == "REDACTED"
     assert res["exchange"]["secret"] == "REDACTED"
     # Didn't add a non-existing key
     assert "accountId" not in res["exchange"]
 
     res = sanitize_config(default_conf_usdt, show_sensitive=True)
-    assert res["exchange"]["key"] == default_conf_usdt["exchange"]["key"]
+    assert res["exchange"]["api_key"] == default_conf_usdt["exchange"]["api_key"]
     assert res["exchange"]["secret"] == default_conf_usdt["exchange"]["secret"]
+
+
+def test_sanitize_config_empty_values():
+    config = {
+        "exchange": {"api_key": "", "secret": None, "ccxt_config": {"apiKey": None}},
+        "telegram": {"token": ""},
+        "pairlists": [{"method": "RemotePairList", "bearer_token": ""}],
+    }
+
+    # Unset credentials are not hidden - there's nothing to hide.
+    assert sanitize_config(config) == config
+
+
+def test_sanitize_config_nested_tokens():
+    config = {
+        "external_message_consumer": {
+            "producers": [{"name": "producer", "host": "localhost", "ws_token": "producer-token"}]
+        },
+        "pairlists": [
+            {"method": "StaticPairList"},
+            {"method": "RemotePairList", "bearer_token": "pairlist-token"},
+        ],
+    }
+    original_config = deepcopy(config)
+
+    result = sanitize_config(config)
+
+    assert result["external_message_consumer"]["producers"] == [
+        {"name": "producer", "host": "localhost", "ws_token": "REDACTED"}
+    ]
+    assert result["pairlists"] == [
+        {"method": "StaticPairList"},
+        {"method": "RemotePairList", "bearer_token": "REDACTED"},
+    ]
+    assert config == original_config
+    assert sanitize_config(config, show_sensitive=True) == original_config
+
+
+@pytest.mark.parametrize("ccxt_section", ["ccxt_config", "ccxt_sync_config", "ccxt_async_config"])
+def test_sanitize_config_ccxt_credentials(ccxt_section):
+    # Ensure all possible "requiredCredentials" variants are sanitized
+    # ccxt also accepts the snake_case variant of each key (apiKey -> api_key)
+    credential_keys = {
+        variant
+        for key in ccxt.Exchange.requiredCredentials
+        for variant in (key, re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower())
+    }
+    config = {
+        "exchange": {
+            "name": "binance",
+            ccxt_section: {key: f"{key}-value" for key in credential_keys} | {"timeout": 5000},
+        }
+    }
+    original_config = deepcopy(config)
+
+    result = sanitize_config(config)
+
+    for key in credential_keys:
+        assert result["exchange"][ccxt_section][key] == "REDACTED"
+    assert result["exchange"][ccxt_section]["timeout"] == 5000
+    assert config == original_config
 
 
 def test_remove_exchange_credentials(default_conf) -> None:
     conf = deepcopy(default_conf)
     remove_exchange_credentials(conf["exchange"], False)
 
-    assert conf["exchange"]["key"] != ""
-    assert conf["exchange"]["secret"] != ""
+    assert conf["exchange"]["api_key"] is not None
+    assert conf["exchange"]["secret"] is not None
 
     remove_exchange_credentials(conf["exchange"], True)
-    assert conf["exchange"]["key"] == ""
-    assert conf["exchange"]["secret"] == ""
-    assert conf["exchange"].get("password", "") == ""
-    assert conf["exchange"].get("uid", "") == ""
+    assert conf["exchange"]["api_key"] is None
+    assert conf["exchange"]["secret"] is None
+    assert conf["exchange"].get("password") is None
+    assert conf["exchange"].get("uid") is None
+
+
+def test_remove_exchange_credentials_ccxt_config() -> None:
+    exchange_config = {
+        "name": "binance",
+        "api_key": "key",
+        "ccxt_config": {"apiKey": "ccxt-key", "secret": "ccxt-secret", "timeout": 5000},
+        "ccxt_async_config": {"password": "ccxt-password"},
+    }
+    remove_exchange_credentials(exchange_config, False)
+    assert exchange_config["ccxt_config"]["apiKey"] == "ccxt-key"
+
+    remove_exchange_credentials(exchange_config, True)
+    assert exchange_config["api_key"] is None
+    assert exchange_config["ccxt_config"] == {"apiKey": None, "secret": None, "timeout": 5000}
+    assert exchange_config["ccxt_async_config"] == {"password": None}
+    # Didn't add non-existing sections
+    assert "ccxt_sync_config" not in exchange_config

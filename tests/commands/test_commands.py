@@ -171,7 +171,7 @@ def test_list_exchanges(capsys):
     assert re.search(r"All exchanges supported by the ccxt library.*", captured.out)
     assert re.search(r".*binance.*", captured.out)
     assert re.search(r".*bingx.*", captured.out)
-    assert re.search(r".*bitmex.*", captured.out)
+    assert re.search(r".*poloniex.*", captured.out)
 
     # Test with --one-column --all
     args = [
@@ -184,7 +184,7 @@ def test_list_exchanges(capsys):
     captured = capsys.readouterr()
     assert re.search(r"^binance$", captured.out, re.MULTILINE)
     assert re.search(r"^bingx$", captured.out, re.MULTILINE)
-    assert re.search(r"^bitmex$", captured.out, re.MULTILINE)
+    assert re.search(r"^poloniex$", captured.out, re.MULTILINE)
 
     # Only dex
     args = [
@@ -1844,10 +1844,12 @@ def test_start_list_data(testdatadir, capsys):
     start_list_data(pargs)
     captured = capsys.readouterr()
 
-    assert "Found 5 pair / timeframe combinations." in captured.out
+    assert "Found 6 pair / timeframe combinations." in captured.out
     assert re.search(r".*Pair.*Timeframe.*Type.*\n", captured.out)
     assert re.search(r"\n.* XRP/USDT:USDT .* 5m, 1h .* futures |\n", captured.out)
     assert re.search(r"\n.* XRP/USDT:USDT .* 1h.* mark |\n", captured.out)
+    assert re.search(r"\n.* XRP/USDT:USDT .* 1h.* funding_rate |\n", captured.out)
+    assert re.search(r"\n.* UNITTEST/USDT:USDT .* 1h.* funding_rate |\n", captured.out)
 
     args = [
         "list-data",
@@ -2023,6 +2025,75 @@ def test_backtesting_show(mocker, testdatadir, capsys):
     assert "Pairs for Strategy" in out
 
 
+def test_backtesting_show_params(mocker, tmp_path, user_dir, capsys, caplog):
+    from freqtrade.optimize.optimize_reports import store_backtest_results
+
+    mocker.patch("freqtrade.optimize.optimize_reports.show_backtest_results")
+    strategy_dir = user_dir / "strategies"
+    strategy_dir.mkdir(parents=True)
+    strategy_file = strategy_dir / "strategy_test_v3.py"
+    shutil.copy(
+        Path(__file__).parent.parent / "strategy" / "strats" / "strategy_test_v3.py", strategy_file
+    )
+    params_file = strategy_file.with_suffix(".json")
+
+    store_backtest_results(
+        {"exportdirectory": tmp_path, "original_config": {}},
+        {"metadata": {}, "strategy": {"StrategyTestV3": {}}, "strategy_comparison": []},
+        "2024_01_01_15_05_25",
+        strategy_files={"StrategyTestV3": str(strategy_file)},
+        strategy_params={"StrategyTestV3": {"buy": {"buy_rsi": 21}}},
+    )
+
+    args = ["backtesting-show", "--export-directory", str(tmp_path)]
+    pargs = get_args(args)
+    pargs["config"] = None
+    start_backtesting_show(pargs)
+
+    out, _err = capsys.readouterr()
+    # Parameters are only shown when asked for
+    assert "STRATEGY PARAMETERS FOR" not in out
+
+    pargs = get_args([*args, "--show-params"])
+    pargs["config"] = None
+    start_backtesting_show(pargs)
+
+    out, _err = capsys.readouterr()
+    assert "STRATEGY PARAMETERS FOR" in out
+    assert "buy_rsi" in out
+    # and only written to disk when asked for
+    assert not params_file.exists()
+
+    pargs = get_args([*args, "--export-params"])
+    pargs["config"] = None
+    start_backtesting_show(pargs)
+
+    exported = json.loads(params_file.read_text())
+    assert exported["strategy_name"] == "StrategyTestV3"
+    assert exported["params"] == {"buy": {"buy_rsi": 21}}
+    assert exported["ft_stratparam_v"] == 1
+
+    # A result without stored parameters says so, instead of showing nothing
+    params_file.unlink()
+    no_params_dir = tmp_path / "no_params"
+    no_params_dir.mkdir()
+    store_backtest_results(
+        {"exportdirectory": no_params_dir, "original_config": {}},
+        {"metadata": {}, "strategy": {"StrategyTestV3": {}}, "strategy_comparison": []},
+        "2024_01_01_15_05_25",
+        strategy_files={"StrategyTestV3": str(strategy_file)},
+    )
+    pargs = get_args(
+        ["backtesting-show", "--export-directory", str(no_params_dir), "--show-params"]
+    )
+    pargs["config"] = None
+    start_backtesting_show(pargs)
+
+    out, _err = capsys.readouterr()
+    assert "STRATEGY PARAMETERS FOR" not in out
+    assert log_has("No parameters stored for StrategyTestV3.", caplog)
+
+
 def test_start_convert_db(fee, tmp_path):
     db_src_file = tmp_path / "db.sqlite"
     db_from = f"sqlite:///{db_src_file}"
@@ -2067,7 +2138,7 @@ def test_start_strategy_updater(mocker, tmp_path):
     pargs["config"] = None
     start_strategy_update(pargs)
     # Number of strategies in the test directory
-    assert sc_mock.call_count == 12
+    assert sc_mock.call_count == 13
 
     sc_mock.reset_mock()
     args = [

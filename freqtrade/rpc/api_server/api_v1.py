@@ -18,6 +18,7 @@ from freqtrade.rpc.api_server.api_schemas import (
     Ping,
     PlotConfig,
     ShowConfig,
+    StrategyName,
     StrategyResponse,
     SysInfo,
     Version,
@@ -27,7 +28,6 @@ from freqtrade.rpc.api_server.deps import (
     get_exchange,
     get_rpc,
     get_rpc_optional,
-    verify_strategy,
 )
 from freqtrade.rpc.rpc import RPCException
 
@@ -69,9 +69,11 @@ logger = logging.getLogger(__name__)
 # 2.45: Add price to forceexit endpoint
 # 2.46: Add prepend_data to download-data endpoint
 # 2.47: Add Strategy parameters
-# 2.48: add /backtest/history/wallets endpoint
+# 2.48: Add /backtest/history/wallets endpoint
 # 2.49: Add /lookahead_analysis and /recursive_analysis endpoints and background job deletion
-API_VERSION = 2.49
+# 2.50: Updated supported timerange to include hour/minute precision.
+# 2.51: Add Strategy parameter Modification in webserver mode, pair_history from backtest result
+API_VERSION = 2.51
 
 # Public API, requires no auth.
 router_public = APIRouter()
@@ -95,7 +97,9 @@ def version():
     return {"version": __version__}
 
 
-@router.get("/show_config", response_model=ShowConfig, tags=["Info"])
+@router.get(
+    "/show_config", response_model=ShowConfig, tags=["Info"], response_model_exclude_unset=True
+)
 def show_config(rpc: RPC | None = Depends(get_rpc_optional), config=Depends(get_config)):
     state: State | str = ""
     strategy_version = None
@@ -114,7 +118,7 @@ def logs(limit: int | None = None):
 
 @router.get("/plot_config", response_model=PlotConfig, tags=["Candle data"])
 def plot_config(
-    strategy: str | None = None,
+    strategy: StrategyName | None = None,
     config=Depends(get_config),
     rpc: RPC | None = Depends(get_rpc_optional),
 ):
@@ -157,10 +161,10 @@ def markets(
 
 @router.get("/strategy/{strategy}", response_model=StrategyResponse, tags=["Strategy"])
 def get_strategy(
-    strategy: str, config=Depends(get_config), rpc: RPC | None = Depends(get_rpc_optional)
+    strategy: StrategyName,
+    config=Depends(get_config),
+    rpc: RPC | None = Depends(get_rpc_optional),
 ):
-    verify_strategy(strategy)
-
     if not rpc or config["runmode"] == RunMode.WEBSERVER:
         # webserver mode
         config_ = deepcopy(config)

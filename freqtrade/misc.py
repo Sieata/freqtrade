@@ -97,6 +97,18 @@ def is_file_in_dir(file: Path, directory: Path) -> bool:
     return file.is_file() and file.parent.samefile(directory)
 
 
+def is_path_in_dir(path: Path, directory: Path) -> bool:
+    """
+    Helper function to check if path is within directory - neither has to exist.
+    :param path: Path to check
+    :param directory: Directory to check against
+        When used in the API, this parameter cannot be user controlled (outside of the config)
+        to avoid security issues.
+    :return: True if path is within directory, False otherwise
+    """
+    return path.resolve().is_relative_to(directory.resolve())
+
+
 def pair_to_filename(pair: str) -> str:
     for ch in ["/", " ", ".", "@", "$", "+", ":"]:
         pair = pair.replace(ch, "_")
@@ -133,12 +145,13 @@ def round_dict(d, n):
 DictMap = dict[str, Any] | Mapping[str, Any]
 
 
-def safe_value_nested(obj: DictMap, keys: str, default_value=None):
+def safe_value_nested(obj: DictMap, keys: str, default_value=None, *, preserve_none=False):
     """
     Search a nested dict for a value.
     :param obj: dict to search in
     :param keys: dot separated keys to search for
     :param default_value: value to return if the key is not found or value is None
+    :param preserve_none: if True, will consider None as a valid value
     :return: value found in dict or default_value
      Sample:
     >>> d = { 'first' : { 'rows' : { 'pass' : 'dog', 'number' : '1' } } }
@@ -147,7 +160,11 @@ def safe_value_nested(obj: DictMap, keys: str, default_value=None):
     """
     nested_obj = obj
     for key in keys.split("."):
-        if isinstance(nested_obj, Mapping) and key in nested_obj and nested_obj[key] is not None:
+        if (
+            isinstance(nested_obj, Mapping)
+            and key in nested_obj
+            and (nested_obj[key] is not None or preserve_none)
+        ):
             nested_obj = nested_obj[key]
         else:
             return default_value

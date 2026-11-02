@@ -160,7 +160,8 @@ AVAILABLE_CLI_OPTIONS = {
     ),
     "timerange": Arg(
         "--timerange",
-        help="Specify what timerange of data to use.",
+        help="Limit action to a specific timerange. Format: "
+        "(`yyyymmdd` or `yyyymmddThhmm` - e.g. `20240101-20240201T1200`).",
     ),
     "max_open_trades": Arg(
         "--max-open-trades",
@@ -191,6 +192,19 @@ AVAILABLE_CLI_OPTIONS = {
     "backtest_show_pair_list": Arg(
         "--show-pair-list",
         help="Show backtesting pairlist sorted by profit.",
+        action="store_true",
+        default=False,
+    ),
+    "backtest_show_params": Arg(
+        "--show-params",
+        help="Show the parameters stored in the backtest result.",
+        action="store_true",
+        default=False,
+    ),
+    "backtest_export_params": Arg(
+        "--export-params",
+        help="Export the parameters stored in the backtest result to the strategy's "
+        "parameter file.",
         action="store_true",
         default=False,
     ),

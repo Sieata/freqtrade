@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, PropertyMock
+from unittest.mock import MagicMock, PropertyMock
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,7 @@ from freqtrade.enums import CandleType, MarginMode, SignalDirection, TradingMode
 from freqtrade.exchange import Exchange, timeframe_to_minutes, timeframe_to_seconds
 from freqtrade.freqtradebot import FreqtradeBot
 from freqtrade.persistence import LocalTrade, Order, Trade, init_db
+from freqtrade.persistence.custom_data import _CustomData
 from freqtrade.resolvers import ExchangeResolver
 from freqtrade.system import set_mp_start_method
 from freqtrade.util import dt_now, dt_ts
@@ -210,26 +211,6 @@ def generate_test_data_raw(timeframe: str, size: int, start: str = "2020-07-05",
     return [list(x) for x in zip(*(df[x].values.tolist() for x in df.columns), strict=False)]
 
 
-# Source: https://stackoverflow.com/questions/29881236/how-to-mock-asyncio-coroutines
-# TODO: This should be replaced with AsyncMock once support for python 3.7 is dropped.
-def get_mock_coro(return_value=None, side_effect=None):
-    async def mock_coro(*args, **kwargs):
-        if side_effect:
-            if isinstance(side_effect, list):
-                effect = side_effect.pop(0)
-            else:
-                effect = side_effect
-            if isinstance(effect, Exception):
-                raise effect
-            if callable(effect):
-                return effect(*args, **kwargs)
-            return effect
-        else:
-            return return_value
-
-    return Mock(wraps=mock_coro)
-
-
 def patched_configuration_load_config_file(mocker, config) -> None:
     mocker.patch(
         "freqtrade.configuration.load_config.load_config_file", lambda *args, **kwargs: config
@@ -241,6 +222,7 @@ def patch_exchange(
 ) -> None:
     mocker.patch(f"{EXMS}.validate_config", MagicMock())
     mocker.patch(f"{EXMS}.validate_timeframes", MagicMock())
+    mocker.patch(f"{EXMS}.check_time_offset", MagicMock())
     mocker.patch(f"{EXMS}.id", PropertyMock(return_value=exchange))
     mocker.patch(f"{EXMS}.name", PropertyMock(return_value=exchange.title()))
     mocker.patch(f"{EXMS}.precisionMode", PropertyMock(return_value=2))
@@ -581,6 +563,21 @@ def patch_coingecko(mocker) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def dispose_db_engine():
+    """
+    Dispose the database engine after each test to release its pooled connection.
+    Without this, leaked connections accumulate and are finalized at random points
+    by the GC, emitting ResourceWarnings in unrelated tests.
+    """
+    yield
+    if (session := getattr(Trade, "session", None)) is not None:
+        bind = session.get_bind()
+        session.remove()
+        _CustomData.session.remove()
+        bind.dispose()
+
+
 @pytest.fixture(scope="function")
 def init_persistence(default_conf):
     init_db(default_conf["db_url"])
@@ -623,7 +620,7 @@ def get_default_conf(testdatadir):
         },
         "exchange": {
             "name": "binance",
-            "key": "key",
+            "api_key": "key",
             "enable_ws": False,
             "secret": "secret",
             "pair_whitelist": ["ETH/BTC", "LTC/BTC", "XRP/BTC", "NEO/BTC"],
@@ -669,7 +666,7 @@ def get_default_conf_usdt(testdatadir):
             "exchange": {
                 "name": "binance",
                 "enabled": True,
-                "key": "key",
+                "api_key": "key",
                 "enable_ws": False,
                 "secret": "secret",
                 "pair_whitelist": [
