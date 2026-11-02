@@ -11,6 +11,7 @@ STRATEGY_WORKFLOW 全流程（VAL 窥视台账按策略名记录，改名不豁�
 | CrashPortfolioV1 | VAL 失败关闭 | RESEARCH 25 |
 | FundingSqueezeV1 | 被 V1L（live 安全变体）替代 | RESEARCH 十三~十五 |
 | OIFlushV1 | 被 V2（30 天动量过滤）替代 | RESEARCH 十二 |
+| TakerFlushV1 | 持仓结构 M4 候选；VAL 未过 Tier B（门禁3 ZEC 集中 60%、门禁7 2026 −$401），关闭 | RESEARCH 27.6/27.7 |
 | WeekendReverseV2Lab | V2 实验副本 | RESEARCH |
 | sample_strategy | freqtrade 示例 | — |
 

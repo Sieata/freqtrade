@@ -14,3 +14,4 @@
 {"date": "2026-10-31", "strategy": "OIFlushV2", "sha16": "d714e0922be08493", "pools": ["top10"], "zips": ["backtest-result-2026-10-31_02-12-31.zip"]}
 {"date": "2026-10-31", "strategy": "FundingSqueezeV1L", "sha16": "091486c816dfd392", "pools": ["top10"], "zips": ["backtest-result-2026-10-31_02-46-30.zip", "backtest-result-2026-10-31_02-47-23.zip"]}
 {"date": "2026-10-31", "strategy": "BigMoveV1", "sha16": "8d337d365356c87d", "pools": ["top10"], "zips": ["backtest-result-2026-10-31_02-46-42.zip", "backtest-result-2026-10-31_02-47-56.zip"]}
+{"date": "2026-11-02", "strategy": "TakerFlushV1", "sha16": "09dd7899282d88b3", "pools": ["top10"], "zips": ["backtest-result-2026-11-02_06-19-20.zip"]}
