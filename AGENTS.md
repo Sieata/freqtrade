@@ -129,6 +129,27 @@
   改动 = 冻结指纹失效，须重走 VAL 并记入 VAL 窥视台账（paper/FREEZE_V2.md）。改参数做实验用副本或策略参数文件。
 - paper 尚未启动（见上节）；启动后 forward-test 期间只记录不改参数，判据见 `user_data/paper/FREEZE_V2.md`。
 
+## 上游同步（2026-11-02 起固定节奏）
+
+- 远端：`upstream` = `freqtrade/freqtrade`。**只合 `upstream/stable`（发版 tag），不合 `upstream/develop`**，
+  避免把上游开发中的改动带进研究/paper 分支。
+- 节奏：上游通常每月发一版（tag 形如 `2026.10`）。**发版后一周内合一次，最长不超过落后两个版本**；
+  下次合入时先看 `git log $(git merge-base upstream/stable HEAD)..upstream/stable --oneline | wc -l`。
+- 流程（Windows 本机为纯 venv，无 uv，用 pip；paper 设备用 `uv sync`，两边都跟 `requirements.txt`）：
+  ```bash
+  git fetch upstream --tags
+  git rev-list --left-right --count upstream/stable...HEAD      # 左=落后 右=本地领先
+  git merge --no-ff upstream/stable                             # 冲突面通常只有 .gitignore
+  .venv/Scripts/python.exe -m pip install -r requirements.txt
+  .venv/Scripts/python.exe -m pip install -e . --no-deps        # 刷新 editable 包的版本/依赖元数据
+  .venv/Scripts/python.exe -m pip check
+  ```
+- 合并后必须验证：导入链、5 个在用策略加载、全部 config 过 `show-config`、`user_data/scripts/tests`、
+  **两臂 TEST 段复现**（`validate_strategy.py --skip-val --no-report`，不跑 VAL、不写窥视台账）。
+  复现结果写进 RESEARCH 新小节（范例：26.19）。上游引擎行为若有变化，逐笔对账后再引用旧结论。
+- 本地改动集中在 `user_data/`，核心代码零改动，历史合并冲突面很小；若上游改了 `user_data/` 模板
+  或 config schema，需额外核对本仓库 config。
+
 ## Git 提交纪律（用户已明确授权，2026-08-28）
 
 - **每完成一个可独立描述的改动单元（bug 修复 / 新脚本工具 / 文档更新 / 配置变更 / 数据更新），主动 commit + push，不要等用户提醒。**
