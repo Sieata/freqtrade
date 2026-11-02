@@ -1,0 +1,13 @@
+# WeekendReverseV2 冻结 paper 池（8 品种）—— 手工快照，仅供复现 FREEZE_V2 配置
+# 来源: user_data/paper/FREEZE_V2.md / user_data/config_paper_v2.json（2026-08-16 冻结）
+# 注意: 本文件不是市值榜生成快照；TOP10/TOP5/CORE 评估仍用对应 pairs_*.txt。
+#       用途仅限：在"实际会跑的 8 品种"上复核仓位/槽位轴，避免把 TOP10 的结论直接套到 paper。
+#
+BTC/USDT:USDT
+ETH/USDT:USDT
+SOL/USDT:USDT
+XRP/USDT:USDT
+ZEC/USDT:USDT
+BANK/USDT:USDT
+CYS/USDT:USDT
+HYPE/USDT:USDT
