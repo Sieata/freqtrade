@@ -94,7 +94,8 @@ def parse_summary(log: pathlib.Path) -> dict | None:
         return None
     table: dict[str, str] = {}
     for line in text.splitlines():
-        cells = line.split("│")
+        # freqtrade 新版摘要表用 ASCII '|'；旧版/部分终端用 box-drawing '│'，两种都兼容
+        cells = line.split("│") if "│" in line else line.split("|")
         if len(cells) < 3:
             continue
         key = cells[1].strip()
