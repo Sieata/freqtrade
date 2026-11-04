@@ -147,6 +147,8 @@ def main():
 
     problems = []
     for tf in args.timeframes.split(","):
+        if tf not in STEP:
+            ap.error(f"未知周期 {tf!r}（--timeframes）；可用: {', '.join(STEP)}")
         step = pd.Timedelta(hours=STEP[tf])
         latest, tf_prob = {}, []
         for p in pairs:

@@ -24,8 +24,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import (  # noqa: E402
-    ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, one_sided_t_p, read_result, result_wallet,
-    run_backtest as _run, trade_pf, trades_frame,
+    ROOT, STAKE, boot_ci, cluster_boot_ci, load_pool, monthly_series, one_sided_t_p,
+    read_result, result_wallet, run_backtest as _run, trade_pf, trades_frame,
 )
 
 # 策略 → config（BigMove 需要自己的 config，别的一律 perpetual）
@@ -50,14 +50,23 @@ def stats_from_zip(zip_path):
     df = trades_frame(trades)
     p = df["profit$"]
     total = p.sum()
-    mon = df.groupby(df["close_dt"].dt.strftime("%Y-%m"))["profit$"].sum()
+    # 亏损年用绝对盈亏和作分母（与 arm_stats.summarize 一致）：否则 best_share /
+    # top_share 会拿负数 total 当分母，打印出"最赚1笔占 -300%"这类误导数字。
+    denom = total if total > 0 else p.abs().sum()
+    # 月度统计一律走全日历（空月补 0）：旧版 mon 只含"有平仓的月"，
+    # 低频臂的"负月%"被系统性低估（无交易月不进分母），且 worst_month 漏掉空月 0。
+    # 与 monthly_series 保持同一口径（portfolio_4arm 已因此修过一次相关矩阵）。
+    # 窗口取回测实际覆盖区间（右端开放的 YTD 年用最后一笔平仓兜底）。
+    lo = pd.to_datetime(stats["backtest_start"], utc=True)
+    hi = pd.to_datetime(stats.get("backtest_end") or df["close_dt"].max(), utc=True)
+    mon = monthly_series(df, lo, hi)
     share = df.groupby("pair_base")["profit$"].sum()
     return {
         "n": len(df), "total": total, "mean": p.mean(), "win": (p > 0).mean() * 100,
         "pf": trade_pf(p),
         "p": one_sided_t_p(p), "ci": boot_ci(p), "ci_m": cluster_boot_ci(df),
-        "ex_best": total - p.max(), "best_share": p.max() / total * 100 if total else float("nan"),
-        "top_pair": share.idxmax(), "top_share": share.max() / total * 100 if total else float("nan"),
+        "ex_best": total - p.max(), "best_share": p.max() / denom * 100 if denom else float("nan"),
+        "top_pair": share.idxmax(), "top_share": share.max() / denom * 100 if denom else float("nan"),
         "pairs_traded": df["pair_base"].nunique(),
         "pairs_win": (share > 0).mean() * 100,
         "worst_month": mon.min(), "neg_month": (mon < 0).mean() * 100,

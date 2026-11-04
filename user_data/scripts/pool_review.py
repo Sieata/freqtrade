@@ -80,7 +80,12 @@ def main():
     ranked = sorted(pair_tot.items(), key=lambda kv: kv[1], reverse=True)
     print("\nconcentration:")
     top3 = ranked[:3]
-    print(f"  top3 pairs: {', '.join(f'{p} {v/grand*100:.0f}%' for p, v in top3)}  = {sum(v for _, v in top3)/grand*100:.0f}% of total")
+    if grand > 0:
+        print(f"  top3 pairs: {', '.join(f'{p} {v/grand*100:.0f}%' for p, v in top3)}  "
+              f"= {sum(v for _, v in top3)/grand*100:.0f}% of total")
+    else:
+        print(f"  top3 pairs: {', '.join(f'{p} {v:+,.0f}$' for p, v in top3)}  "
+              "（总利润 ≤ 0，占比无意义，改列绝对 $）")
     for p, v in top3:
         ys = [(y, cell[(p, y)]) for y in years if cell.get((p, y), 0) > 0]
         best = max(ys, key=lambda kv: kv[1]) if ys else ("-", 0)

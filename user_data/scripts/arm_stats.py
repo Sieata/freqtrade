@@ -58,7 +58,7 @@ def summarize(df, dim="seg"):
 def main():
     ap = argparse.ArgumentParser(description="单臂统计质量表（显著性 + 集中度自检）")
     ap.add_argument("--pool", default="top5", help="币池名（user_data/universe/pairs_<pool>.txt）")
-    ap.add_argument("--arms", default="", help="逗号分隔策略名，默认内置 5 个")
+    ap.add_argument("--arms", default="", help="逗号分隔策略名，默认内置 4 个")
     args = ap.parse_args()
     arms = [a for a in args.arms.split(",") if a] or DEFAULT_ARMS
 

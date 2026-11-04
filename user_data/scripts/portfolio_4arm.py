@@ -101,13 +101,27 @@ def report(parts, seg, window):
 
 
 def fit_weights(monthly):
-    """在给定月度矩阵上估三套权重（归一化到 V2 = 1）。"""
-    sd = monthly.std(ddof=1)
-    out = {"1:1": pd.Series(1.0, index=monthly.columns), "逆波动": 1 / sd}
+    """在给定月度矩阵上估三套权重（归一化到 V2 = 1）。
+
+    边界保护：某臂整段无交易 → 月度 σ=0，逆波动权重原本会变 inf；
+    所有臂均值 ≤0 → 最大Sharpe 解被 clip 成全 0，归一化原本是 0/0 = NaN，
+    配比检验会静默打印一堆 NaN 而不是报错。零权重方案在 VAL 上等价于"不加该臂"，
+    是比 NaN 更诚实的结果。
+    """
+    sd = monthly.std(ddof=1).replace(0, np.nan)
+    out = {"1:1": pd.Series(1.0, index=monthly.columns), "逆波动": (1 / sd).fillna(0.0)}
     mu, cov = monthly.mean().values, monthly.cov().values
-    w = np.clip(np.linalg.solve(cov + 1e-9 * np.eye(len(mu)), mu), 0, None)
+    try:
+        w = np.clip(np.linalg.solve(cov + 1e-9 * np.eye(len(mu)), mu), 0, None)
+    except np.linalg.LinAlgError:
+        w = np.zeros(len(mu))
     out["最大Sharpe"] = pd.Series(w, index=monthly.columns)
-    return {k: v / v["V2"] if v["V2"] > 0 else v / v.max() for k, v in out.items()}
+
+    def norm(v):
+        scale = v["V2"] if v["V2"] > 0 else v.max()
+        return v / scale if scale > 0 else pd.Series(0.0, index=v.index)
+
+    return {k: norm(v) for k, v in out.items()}
 
 
 def weight_oos(m_test, m_val, y_test, y_val):

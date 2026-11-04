@@ -119,7 +119,13 @@ def main() -> None:
             df = candles(t["pair"])
             if df is None:
                 continue
-            ci = df.index[df["date"] == pd.Timestamp(t["close_date"])]
+            # feather 的 date 是 tz-aware(+00:00)，freqtrade 导出的 close_date 是无时区字符串；
+            # 直接 == 在 pandas 2.x 会抛 TypeError（或全 False），让 [5] 止损反事实整段静默失效。
+            # 两边统一到 naive UTC 再比较，兼容老 feather（naive）与新 feather（aware）。
+            ts = pd.Timestamp(t["close_date"])
+            dates = (df["date"].dt.tz_localize(None)
+                     if isinstance(df["date"].dtype, pd.DatetimeTZDtype) else df["date"])
+            ci = df.index[dates == (ts.tz_convert(None) if ts.tzinfo is not None else ts)]
             if not len(ci):
                 continue
             i = ci[0]

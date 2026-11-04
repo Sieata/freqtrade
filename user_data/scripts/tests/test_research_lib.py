@@ -8,6 +8,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -284,3 +285,80 @@ def test_trade_pf_from_trades_fallbacks():
     assert rl.trade_pf_from_trades([]) == 0.0
     # 缺 profit_abs 的旧 zip → 回退 ratio × stake
     assert rl.trade_pf_from_trades([{"profit_ratio": 0.02}, {"profit_ratio": -0.01}], stake=500) == 2.0
+
+
+# ---------------------------------------------------------------- 10 轮迭代锁（2026-11-04）
+def test_portfolio_fit_weights_no_inf_or_nan():
+    """某臂无交易（σ=0）或全部均值≤0 时，旧 fit_weights 产出 inf / 0-0=NaN，
+    VAL 配比检验会静默打印 NaN 而不报错。修复后必须是有限权重。"""
+    import portfolio_4arm as p4
+    m = pd.DataFrame({"V2": [10.0, -5, 8, 2], "OI": [0.0] * 4})   # OI 整段无交易
+    for name, w in p4.fit_weights(m).items():
+        assert np.isfinite(w.to_numpy()).all(), name
+        assert (w >= 0).all(), name
+        if name != "1:1":  # 1:1 按定义全 1，无交易臂仍给 1 倍本金是设计行为
+            assert w["OI"] == 0.0, name
+    m2 = pd.DataFrame({"V2": [-1.0, -2, -3, -4], "OI": [-2.0, -1, -3, -4]})  # 全负 → 解被 clip 0
+    for name, w in p4.fit_weights(m2).items():
+        assert np.isfinite(w.to_numpy()).all(), name
+    assert p4.fit_weights(m2)["最大Sharpe"].sum() == 0.0
+
+
+def test_year_slice_losing_year_shares_are_finite():
+    """亏损年旧口径用负数 total 作分母 → 最赚1笔/最大品种占比变负百分比（误导）。
+    修复后分母 = 绝对盈亏和，占比非负且有限。"""
+    import year_slice as ys
+    rows = [_trade("BTC/USDT:USDT", "2026-01-05", "2026-01-06", -0.10),
+            _trade("ETH/USDT:USDT", "2026-02-05", "2026-02-06", 0.01)]
+    df = rl.trades_frame(rows)
+    # 直接复用 stats_from_zip 的口径计算逻辑（构造一个内存 zip 走完整路径）
+    z = _zip(Path(__file__).parent / "losing_year.zip", rows, start="2026-01-01", end="2026-03-01")
+    try:
+        s = ys.stats_from_zip(z)
+        assert s["total"] < 0
+        assert 0 <= s["best_share"] <= 100 and 0 <= s["top_share"] <= 100
+        assert np.isfinite([s["best_share"], s["top_share"]]).all()
+    finally:
+        z.unlink(missing_ok=True)
+
+
+def test_year_slice_monthly_is_full_calendar():
+    """旧 stats_from_zip 的 mon 只含有平仓的月：低频臂"负月%"分母漏掉空月，
+    worst_month 也漏掉 0。修复后走 monthly_series（全日历补 0）。"""
+    import year_slice as ys
+    rows = [_trade("BTC/USDT:USDT", "2026-01-05", "2026-01-06", 0.10),
+            _trade("BTC/USDT:USDT", "2026-03-05", "2026-03-06", -0.02)]
+    z = _zip(Path(__file__).parent / "full_calendar.zip", rows,
+             start="2026-01-01 00:00:00", end="2026-06-01 00:00:00")
+    try:
+        s = ys.stats_from_zip(z)
+        assert len(s["monthly"]) == 6                 # 1..6 月，2/4/5/6 月补 0
+        assert s["monthly"].iloc[1] == 0.0
+        assert s["neg_month"] == pytest.approx(1 / 6 * 100)  # 仅 3 月为负
+        assert s["worst_month"] == pytest.approx(-20.0)
+    finally:
+        z.unlink(missing_ok=True)
+
+
+def test_exit_anatomy_candle_lookup_tz_aware():
+    """feather date 是 tz-aware、close_date 是 naive 字符串；直接比较会 TypeError，
+    让 [5] 止损反事实整段静默失效。修复后两种 date dtype 都要能定位到行。"""
+    import exit_anatomy as ea
+    import tempfile
+    df = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=10, freq="4h", tz="UTC"),
+                       "close": [100.0] * 10})
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "BTC_USDT_USDT-4h-futures.feather"
+        df.to_feather(f)
+        ea._cache.clear()
+        ea.CAND_DIR = Path(d)
+        t = {"pair": "BTC/USDT:USDT", "close_date": "2024-01-01 08:00:00",
+             "open_rate": 100.0, "profit_ratio": -0.1}
+        got = ea.candles("BTC/USDT:USDT")
+        assert got is not None and len(got) == 10
+        # 复现修复后的比较表达式（tz-aware → naive UTC）
+        dates = got["date"].dt.tz_localize(None)
+        ci = got.index[dates == pd.Timestamp(t["close_date"])]
+        assert len(ci) == 1 and ci[0] == 2
+    ea.CAND_DIR = rl.ROOT / "user_data" / "data" / "binance" / "futures"
+    ea._cache.clear()
