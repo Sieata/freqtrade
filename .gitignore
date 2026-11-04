@@ -41,6 +41,11 @@ user_data/data/binance/*
 # 交割合约与币本位（COIN-M）数据同样随仓库分发（研究可复现，免依赖代理下载）
 !user_data/data/binance/quarterly/
 !user_data/data/binance/cm/
+# 另类数据快照（约 1MB，抓取脚本 user_data/scripts/fetch_altdata.py；研究可复现）
+!user_data/data/external/
+user_data/data/external/*
+!user_data/data/external/*.csv
+!user_data/data/external/README.md
 freqtrade-plot.html
 freqtrade-profit-plot.html
 freqtrade/rpc/api_server/ui/*
