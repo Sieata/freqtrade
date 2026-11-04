@@ -362,3 +362,59 @@ def test_exit_anatomy_candle_lookup_tz_aware():
         assert len(ci) == 1 and ci[0] == 2
     ea.CAND_DIR = rl.ROOT / "user_data" / "data" / "binance" / "futures"
     ea._cache.clear()
+
+
+# ---------------------------------------------------------------- 补足 10 轮实质改进（2026-11-04）
+def test_oi_merge_detects_gap_and_atomic_write(sandbox, tmp_path):
+    """OI 是"漏跑即永久缺口"的数据件：只报 +N 会掩盖接缝断裂；非原子写入中断会毁全文件。"""
+    import oi_accumulate as oi
+    old = pd.DataFrame({"date": pd.to_datetime(["2026-08-01 00:00", "2026-08-01 04:00"], utc=True),
+                        "oi_usd": [1.0, 2.0]})
+    # 正常增量（相差 4h）→ 无缺口告警
+    new = pd.DataFrame({"date": pd.to_datetime(["2026-08-01 08:00"], utc=True), "oi_usd": [3.0]})
+    df, added, gap = oi.merge_old_new(old, new)
+    assert added == 1 and gap is None and len(df) == 3
+    # 只有重叠行时必须报 0（旧实现把 cutoff 回看窗口内的重取算成新增）
+    _, overlap_added, _ = oi.merge_old_new(old, old.copy())
+    assert overlap_added == 0
+    # 断 9 天 → 必须报缺口（旧 API 窗口之外的部分已无法回补）
+    late = pd.DataFrame({"date": pd.to_datetime(["2026-08-10 08:00"], utc=True), "oi_usd": [4.0]})
+    _, _, gap = oi.merge_old_new(old, late)
+    assert gap is not None and gap > 8
+    # 原子写：落盘后没有 .tmp 残留，且可读回
+    out = tmp_path / "x.feather"
+    oi.atomic_to_feather(df, out)
+    assert out.exists() and not out.with_name(out.name + ".tmp").exists()
+    assert len(pd.read_feather(out)) == 3
+
+
+def test_signal_recon_flags_signals_where_backtest_expected_none():
+    """旧实现 `if e > 0 and abs(dev) > 30`：回测预期 0、live 有信号时 dev=inf 却不 FLAG，
+    恰好漏掉最强的体制漂移信号。"""
+    import signal_recon as sr
+    assert sr.deviation(0, 0) == (0.0, False)
+    dev, flag = sr.deviation(0, 3)
+    assert flag is True and dev == float("inf")
+    assert sr.deviation(10, 12)[1] is False          # +20% 正常
+    assert sr.deviation(10, 20)[1] is True           # +100% FLAG
+    assert sr.deviation(10, 5)[1] is True            # -50% FLAG
+
+
+def test_bt_summary_lists_every_strategy(sandbox, capsys, monkeypatch):
+    """多策略 zip 只打印第一个：与 iter_results 契约及其单测注释直接矛盾。"""
+    import bt_summary
+    body = {"strategy": {
+        "A": {"trades": [], "profit_total_abs": 100, "profit_total": 0.1, "winrate": 0.5,
+              "profit_factor": 1.5, "max_relative_drawdown": 0.2, "max_drawdown_account": 0.1,
+              "total_trades": 3},
+        "B": {"trades": [], "profit_total_abs": 200, "profit_total": 0.2, "winrate": 0.6,
+              "profit_factor": 2.0, "max_relative_drawdown": 0.3, "max_drawdown_account": 0.2,
+              "total_trades": 4}},
+        "timerange": "2022-2024"}
+    p = sandbox / "bt" / "backtest-result-multi2.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("multi2.json", json.dumps(body))
+    bt_summary.summarize(p)
+    out = capsys.readouterr().out
+    assert " A " in out and " B " in out, out
+    assert out.count("ddW=") == 2

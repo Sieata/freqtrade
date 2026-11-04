@@ -42,6 +42,18 @@ def live_monthly(db, bases):
     return df.groupby("month").size().sort_index()
 
 
+def deviation(e, l):
+    """单月对账 → (偏差%, 是否 FLAG)。
+
+    e=0 且 l>0 必须 FLAG：回测预期没有任何信号、live 却出现信号，是最强的体制漂移
+    证据；旧实现只在 `e > 0` 时判 FLAG，恰好吃掉这一类（dev 被算成 inf 却标不出来）。
+    """
+    if e == 0:
+        return (0.0 if l == 0 else float("inf")), l > 0
+    dev = (l - e) / e * 100
+    return dev, abs(dev) > 30
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--strategy", default="FundingSqueezeV1L")
@@ -69,12 +81,9 @@ def main():
     flags = 0
     for k in sorted(set(exp.index) | set(live.index)):
         e, l = int(exp.get(k, 0)), int(live.get(k, 0))
-        if e == 0:
-            dev = 0.0 if l == 0 else float("inf")
-        else:
-            dev = (l - e) / e * 100
+        dev, flagged = deviation(e, l)
         mark = ""
-        if e > 0 and abs(dev) > 30:
+        if flagged:
             mark = "  ← FLAG"
             flags += 1
         print(f"  {k}: 预期 {e:>3}  实际 {l:>3}  偏差 {dev:+7.0f}%{mark}")

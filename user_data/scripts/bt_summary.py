@@ -14,24 +14,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from research_lib import iter_results  # noqa: E402
 
 
+def _num(v, default=0.0):
+    return float(v) if v is not None else default
+
+
 def summarize(zip_path):
+    """打印 zip 内**全部**策略各一行。
+
+    旧实现循环里直接 return，多策略 zip 只显示第一个——iter_results 的 docstring
+    与单测都明确"bt_summary 需遍历全部策略"，消费端却把契约丢了。
+    """
+    shown = 0
     for name, s, _, meta in iter_results(zip_path):
-        ddw = float(s.get("max_relative_drawdown", 0) or 0)
-        dda = float(s.get("max_drawdown_account", 0) or 0)
+        ddw = _num(s.get("max_relative_drawdown"))
+        dda = _num(s.get("max_drawdown_account"))
         tspan = meta.get("timerange") or (
             f"{str(s.get('backtest_start', ''))[:10]}~"
             f"{str(s.get('backtest_end', ''))[:10]}")
         # 裸文件名（常见的 `*.zip` 通配结果）不能直接 split('/') 取末段
         print(f"{Path(zip_path).name[:44]:<44} {name:<20} "
-              f"trades={s.get('total_trades','?'):>4} "
-              f"profit={s.get('profit_total_abs', 0):>12,.0f}$ "
-              f"({s.get('profit_total', 0)*100:>7.2f}%) "
-              f"win%={s.get('winrate', 0)*100:>5.1f} "
-              f"PF={s.get('profit_factor', 0):>5.2f} "
+              f"trades={s.get('total_trades', '?'):>4} "
+              f"profit={_num(s.get('profit_total_abs')):>12,.0f}$ "
+              f"({_num(s.get('profit_total'))*100:>7.2f}%) "
+              f"win%={_num(s.get('winrate'))*100:>5.1f} "
+              f"PF={_num(s.get('profit_factor')):>5.2f} "
               f"ddW={ddw*100:>5.1f}% ddA={dda*100:>5.1f}% "
               f"[{tspan}]")
-        return
-    print(f"{zip_path}: no strategy results found")
+        shown += 1
+    if not shown:
+        print(f"{zip_path}: no strategy results found")
 
 
 if __name__ == "__main__":
