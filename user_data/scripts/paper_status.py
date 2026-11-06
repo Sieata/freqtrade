@@ -68,6 +68,11 @@ def load_closed(db):
     con = sqlite3.connect(db)
     cur = con.cursor()
     cols = [r[1] for r in cur.execute("PRAGMA table_info(trades)").fetchall()]
+    if not cols:
+        # db 文件存在但从未初始化（0 字节/无 trades 表：paper 尚未产生任何交易）。
+        # 视为“无 db”，交给 main() 打印友好提示，而不是让 SELECT 抛 OperationalError。
+        con.close()
+        return None, None
     prof = "profit_abs" if "profit_abs" in cols else "close_profit_abs"
     rows = cur.execute(
         f"SELECT pair, {prof}, close_date, stake_amount, is_open "

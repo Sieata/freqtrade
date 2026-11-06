@@ -477,3 +477,38 @@ def test_trades_frame_segments_and_columns(sandbox):
     assert list(df["pair_base"]) == ["BTC", "ETH"]
     tagged = rl.trades_frame(trades, seg="VAL")
     assert (tagged["seg"] == "VAL").all() and len(tagged) == 2
+
+
+# ---------------------------------------------------------------- paper_status 空 db 容错
+def test_paper_status_load_closed_handles_uninitialized_db(tmp_path):
+    """paper_status.load_closed：db 存在但从未初始化（0 字节/无 trades 表）时须返回 (None,None)，
+    而不是让 SELECT 抛 sqlite3.OperationalError 崩栈。本机三个 dry-run db 全零交易即为该场景。"""
+    import sqlite3
+    import paper_status as ps
+
+    # 1) db 文件不存在
+    missing = tmp_path / "nope.sqlite"
+    assert ps.load_closed(str(missing)) == (None, None)
+
+    # 2) 0 字节空文件（V2 tradesv3.dryrun.sqlite 的实际状况）
+    empty = tmp_path / "empty.sqlite"
+    empty.write_bytes(b"")
+    assert ps.load_closed(str(empty)) == (None, None)
+
+    # 3) 有 trades 表但零行 → 返回空列表（不是 None）
+    inited = tmp_path / "inited.sqlite"
+    con = sqlite3.connect(inited)
+    con.execute("CREATE TABLE trades (pair TEXT, profit_abs REAL, close_date TEXT, "
+                "stake_amount REAL, is_open INTEGER)")
+    con.commit()
+    con.close()
+    rows, prof = ps.load_closed(str(inited))
+    assert rows == [] and prof == "profit_abs"
+
+    # 4) 有一行已平仓 → 读出
+    con = sqlite3.connect(inited)
+    con.execute("INSERT INTO trades VALUES ('BTC/USDT:USDT', 12.5, '2026-01-01 00:00:00', 1000, 0)")
+    con.commit()
+    con.close()
+    rows, prof = ps.load_closed(str(inited))
+    assert len(rows) == 1 and rows[0][0] == "BTC/USDT:USDT"
