@@ -418,3 +418,62 @@ def test_bt_summary_lists_every_strategy(sandbox, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert " A " in out and " B " in out, out
     assert out.count("ddW=") == 2
+
+
+# ---------------------------------------------------------------- 逐笔统计 / 自举 CI
+def test_one_sided_t_p_matches_scipy_and_boundaries():
+    """单边 t p 值：与 scipy 解析值一致；边界 n<3→nan、全正→极小、全负→≈1、零方差。"""
+    from scipy import stats
+    d = pd.Series([1.0, 2, 3, 4, 5, 2, 3, 6, 1, 4])
+    t = d.mean() / (d.std(ddof=1) / len(d) ** 0.5)
+    assert abs(rl.one_sided_t_p(d) - stats.t.sf(t, df=len(d) - 1)) < 1e-12
+    assert np.isnan(rl.one_sided_t_p(pd.Series([1.0, 2])))          # n<3
+    assert rl.one_sided_t_p(pd.Series([1.0, 2, 3, 4, 5, 6, 7])) < 0.01
+    assert rl.one_sided_t_p(pd.Series([-1.0, -2, -3, -4, -5, -6, -7])) > 0.99
+    assert rl.one_sided_t_p(pd.Series([1.0, 1, 1, 1])) == 0.0       # 零方差且均值>0
+    assert rl.one_sided_t_p(pd.Series([-1.0, -1, -1, -1])) == 1.0   # 零方差且均值≤0
+
+
+def test_boot_ci_deterministic_and_brackets_mean():
+    """自举 CI：同 seed 可复现；95% 区间应包含样本均值；n<3 返回 nan。"""
+    d = pd.Series(np.random.RandomState(0).normal(1, 2, 200))
+    c1, c2 = rl.boot_ci(d), rl.boot_ci(d)
+    assert c1 == c2                                                 # 确定性
+    assert c1[0] < d.mean() < c1[1]
+    lo, hi = rl.boot_ci(pd.Series([1.0, 2]))
+    assert np.isnan(lo) and np.isnan(hi)
+
+
+def test_cluster_boot_ci_respects_month_blocks():
+    """按月聚类自举：同 seed 可复现；区间含总体均值；<3 个月返回 nan。"""
+    rows = []
+    rng = np.random.RandomState(1)
+    for m in ("2024-01", "2024-02", "2024-03", "2024-04"):
+        for _ in range(10):
+            rows.append({"profit$": float(rng.normal(5, 3)),
+                         "close_dt": pd.Timestamp(m + "-15", tz="UTC")})
+    df = pd.DataFrame(rows)
+    c1, c2 = rl.cluster_boot_ci(df), rl.cluster_boot_ci(df)
+    assert c1 == c2
+    assert c1[0] < df["profit$"].mean() < c1[1]
+    one = pd.DataFrame({"profit$": [1.0, 2.0], "close_dt": pd.to_datetime(["2024-01-01", "2024-02-01"], utc=True)})
+    lo, hi = rl.cluster_boot_ci(one)
+    assert np.isnan(lo) and np.isnan(hi)
+
+
+def test_split_ts_reads_sandbox_splits(sandbox):
+    """split_ts 从沙箱 splits.json 读切分日期，tz-aware UTC。"""
+    ts = rl.split_ts()
+    assert ts == pd.Timestamp("2024-08-28", tz="UTC")
+
+
+def test_trades_frame_segments_and_columns(sandbox):
+    """trades_frame：profit$ = profit_ratio×1000；seg 给整帧打常量段标签（不过滤）。"""
+    trades = [_trade("BTC/USDT:USDT", "2022-01-01", "2022-06-01", 0.01),
+              _trade("ETH/USDT:USDT", "2024-01-01", "2024-06-01", 0.02)]
+    df = rl.trades_frame(trades)
+    assert set(["pair", "profit$", "close_dt", "open_dt", "pair_base"]).issubset(df.columns)
+    assert abs(df["profit$"].sum() - 30.0) < 1e-9                   # (0.01+0.02)*1000
+    assert list(df["pair_base"]) == ["BTC", "ETH"]
+    tagged = rl.trades_frame(trades, seg="VAL")
+    assert (tagged["seg"] == "VAL").all() and len(tagged) == 2
