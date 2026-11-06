@@ -519,3 +519,31 @@ def test_iter_results_missing_zip_is_clear_error(sandbox):
     with pytest.raises(SystemExit) as ei:
         list(rl.iter_results(sandbox / "bt" / "ghost.zip"))
     assert "不存在" in str(ei.value)
+
+
+def test_val_gate_drawdown_uses_wallet_metric_not_account():
+    """VAL 回撤门禁必须用钱包口径 dd（max_relative_drawdown），不是账户口径 dd_acct。
+    2026-10-07 前的哑失败：门禁误用 max_drawdown_account（同回测 20.2% vs 32.1%），
+    门禁系统性偏松。此测试锁住回归——即便 dd_acct 达标、只要 dd 超线就必须 FAIL。"""
+    import validate_strategy as v
+
+    base = {"profit_abs": 1000.0, "pf": 2.0, "trades": 50,
+            "pairs_profitable": 10, "pairs_total": 10, "dd_slots": 3.2}
+
+    def gate_result(portfolio):
+        for name, result, detail in v.gate_check("VAL", portfolio, {}):
+            if name == "回撤≤30%":
+                return result, detail
+        raise AssertionError("未找到回撤门禁")
+
+    # dd=0.35 超 30% 线；dd_acct=0.15 看似达标 → 必须 FAIL（按 dd 判）
+    over = dict(base, dd=0.35, dd_acct=0.15)
+    r, detail = gate_result(over)
+    assert r == "FAIL"
+
+    # dd=0.25 在 30% 线内 → PASS
+    under = dict(base, dd=0.25, dd_acct=0.15)
+    assert gate_result(under)[0] == "PASS"
+
+    # 说明文字应同时披露两口径，且以钱包口径为主
+    assert "钱包口径" in detail and "max_relative_drawdown" in detail
