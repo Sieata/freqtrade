@@ -33,6 +33,11 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+# 本脚本无 argparse，整体即流程；防止误传 --help/-h 时直接触发全量网络抓取。
+if any(a in ("-h", "--help") for a in sys.argv[1:]):
+    print(__doc__.strip())
+    sys.exit(0)
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUT = ROOT / "user_data" / "data" / "external"
 OUT.mkdir(parents=True, exist_ok=True)
