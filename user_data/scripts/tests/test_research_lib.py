@@ -512,3 +512,10 @@ def test_paper_status_load_closed_handles_uninitialized_db(tmp_path):
     con.close()
     rows, prof = ps.load_closed(str(inited))
     assert len(rows) == 1 and rows[0][0] == "BTC/USDT:USDT"
+
+
+def test_iter_results_missing_zip_is_clear_error(sandbox):
+    """不存在的 zip 应给出清晰的 SystemExit，而不是让 ZipFile 抛原始 FileNotFoundError 栈。"""
+    with pytest.raises(SystemExit) as ei:
+        list(rl.iter_results(sandbox / "bt" / "ghost.zip"))
+    assert "不存在" in str(ei.value)

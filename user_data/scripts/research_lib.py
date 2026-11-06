@@ -97,6 +97,9 @@ def iter_results(zip_path):
     一个 zip 通常只含一个策略；bt_summary 需遍历全部策略，其余脚本用 read_result 取首个。
     """
     p = _resolve_zip(zip_path)
+    if not p.exists():
+        # 与“无策略结果”一致地给清晰错误，而不是让 ZipFile 抛原始 FileNotFoundError 栈
+        raise SystemExit(f"{p.name}: 文件不存在（解析为 {p}）")
     with zipfile.ZipFile(p) as z:
         for n in z.namelist():
             if not n.endswith(".json"):
