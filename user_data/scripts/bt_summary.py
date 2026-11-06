@@ -46,5 +46,9 @@ def summarize(zip_path):
 
 
 if __name__ == "__main__":
-    for p in sys.argv[1:]:
+    args = sys.argv[1:]
+    if not args or any(a in ("-h", "--help") for a in args):
+        print(__doc__.strip())
+        sys.exit(0)
+    for p in args:
         summarize(p)
