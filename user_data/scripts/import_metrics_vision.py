@@ -81,7 +81,12 @@ def build(sym):
 
 
 def main():
-    symbols = sys.argv[1:] or PHASE1_PAIRS
+    argv = sys.argv[1:]
+    # 无 argparse：防止误传 --help/-h 被当作 symbol 名而触发网络抓取。
+    if any(a in ("-h", "--help") for a in argv):
+        print(__doc__.strip())
+        return
+    symbols = argv or PHASE1_PAIRS
     print("processing:", symbols, flush=True)
     for s in symbols:
         print(build(s), flush=True)
