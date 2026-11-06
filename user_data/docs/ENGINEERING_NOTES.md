@@ -65,6 +65,9 @@
    症状：回测结果与"分级仓位没生效"完全一致、trade 记录里 tag 全空。修复前后对比见 RESEARCH.md 第九节。
 2. **满仓复利口径的逐品种归因不可用于选池**（交易顺序 × 复利路径的假象）；独立口径（每笔固定 $1,000）
    才是品种 edge 的可信度量 → `user_data/scripts/pool_review.py`（品种 × 年度矩阵 + 集中度 + 止损缺口检查）。
+   （补充 2026-11-06：`research_lib.iter_results` 对不存在的 zip 原会抛原始 `FileNotFoundError` 栈，
+   现改为 `SystemExit("<name>: 文件不存在（解析为 <path>）")`，与"无策略结果"一致；
+   `bt_summary / pool_review / exit_anatomy / arm_compare` 都走它，已统一。）
 3. **回撤口径**：文档里"钱包口径回撤" = `max_relative_drawdown`，不是 `max_drawdown_account`（后者同期只有 20.2%）。
 4. **dry-run DB 默认落在 CWD**：`sqlite:///tradesv3.dryrun.sqlite` 是相对路径 → config 显式
    `"db_url": "sqlite:///user_data/tradesv3.dryrun.sqlite"`，且启动脚本里 `cd $ROOT`。
@@ -111,9 +114,14 @@
 
 ## 四、运维备忘
 
-1. **paper 机器人存活依赖**：本机不睡眠（周末持仓 + 无交易所侧止损）+ Clash 代理存活。开盘前看一眼 heartbeat 时间戳。
-2. **每周记录**：`.venv/bin/python user_data/scripts/paper_status.py`；forward-test 期间策略文件不可改
-   （SHA 变化 = 本次作废，见 paper/FREEZE_V2.md）。
+1. **paper 机器人存活依赖**（⚠️ 本机当前**无 paper 设备、从未运行**，见 RESEARCH 26.10；以下仅适用于将来真启动 paper 后）：
+   本机不睡眠（周末持仓 + 无交易所侧止损）+ Clash 代理存活。开盘前看一眼 heartbeat 时间戳。
+2. **每周记录**：`.venv/bin/python user_data/scripts/paper_status.py`（⚠️ 本机三个 dry-run db 全零交易，
+   跑它会打印"no dry-run DB found"并 exit 1，属预期；forward-test 期间策略文件不可改，
+   SHA 变化 = 本次作废，见 paper/FREEZE_V2.md）。
+   - `paper_status.load_closed` 已容错：db 文件存在但**从未初始化**（0 字节 / 无 `trades` 表，
+     V2 的 `tradesv3.dryrun.sqlite` 即如此）时按"无 db"返回 `(None, None)` 并给友好提示，
+     不再让 `SELECT ... FROM trades` 抛 `sqlite3.OperationalError` 崩栈（2026-11-06 修，已补单测）。
 3. **数据已随仓库分发**（`user_data/data/binance/futures/`，见其中 README.md）：新机器 clone 即用，
    `ensure-data.sh` 只做增量。feather 整文件重写 → 每次全量刷新 git 历史约 +23MB，按月刷新即可。
 4. **冻结文档的 SHA 字段会过期**：策略文件在冻结后同日又优化过、文档没跟上（FREEZE.md 曾记错 V1 SHA）。
