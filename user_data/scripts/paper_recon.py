@@ -21,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DATA = ROOT / "user_data" / "data" / "binance" / "futures"
+METRICS = ROOT / "user_data" / "data" / "binance" / "futures_metrics"
 
 # 各臂的 db 与 config（与 paper_restart.ARMS 对齐）
 ARM_DB = {
@@ -30,6 +31,13 @@ ARM_DB = {
 # V2 入场参数默认值（WeekendReverseV2.py ClassVar，冻结不可改，这里复刻用于离线重放）
 V2_BUY_DROP = 0.02          # buy_drop 默认（WeekendReverseV2.py:69 DecimalParameter default=0.02）
 V2_BUY_WINDOW_MODE = "fri_mon"
+# OI 入场参数默认值（OIFlushV2.py 冻结不可改，这里复刻用于离线重放）
+OI_QUANTILE = 0.05
+OI_WINDOW = 1080
+OI_MIN_PERIODS = 360
+OI_CRASH_THRESHOLD = -0.05
+OI_MOM_WINDOW = 180
+OI_SHIFT = 6
 
 
 def _kline_fname(pair, tf="4h"):
@@ -93,6 +101,31 @@ def v2_long_entry(df, buy_drop=V2_BUY_DROP):
     return entry
 
 
+def oi_flush_entry(df, metrics_df):
+    """复刻 OIFlushV2.py populate_indicators 的 flush 入场条件（默认参数）。
+
+    df: 4h K 线（含 open/high/low/close/volume/date）。
+    metrics_df: metrics feather（含 date/oi_usd）。按 date 左连接；与策略一致。
+    返回与 df 对齐的布尔 Series（flush）。
+    """
+    import pandas as pd
+
+    if metrics_df is None or metrics_df.empty:
+        return pd.Series(False, index=df.index)
+    m = metrics_df.copy()
+    m["oi_chg"] = m["oi_usd"] / m["oi_usd"].shift(OI_SHIFT) - 1
+    m["oi_q"] = m["oi_chg"].rolling(OI_WINDOW, min_periods=OI_MIN_PERIODS).quantile(OI_QUANTILE)
+    d = df.merge(m[["date", "oi_chg", "oi_q"]], on="date", how="left")
+    d["ret4"] = d["close"] / d["close"].shift(1) - 1
+    d["mom30"] = d["close"] / d["close"].shift(OI_MOM_WINDOW) - 1
+    flush = (
+        (d["oi_chg"] <= d["oi_q"])
+        & (d["ret4"] <= OI_CRASH_THRESHOLD)
+        & (d["mom30"] > 0)
+    )
+    return pd.Series(flush.fillna(False).values, index=df.index)
+
+
 def _trades_open_dates(db_path):
     """返回 [(pair, open_date_str), ...]；db 或表缺失返回 []。"""
     if not db_path.exists():
@@ -129,14 +162,14 @@ def recon_arm(arm, days=14, pool="top10"):
     """
     import pandas as pd
 
-    if arm != "v2":
+    if arm not in ARM_DB:
         return {
             "arm": arm,
             "skipped": True,
-            "reason": "OI 臂入场条件依赖 metrics 数据流，本对账仅覆盖 V2 周末窗口",
+            "reason": f"未支持的臂 {arm}",
         }
 
-    db = ARM_DB["v2"]
+    db = ARM_DB[arm]
     pairs = _load_pool(pool)
     now = pd.Timestamp.now(tz="UTC")
     since = now - pd.Timedelta(days=days)
@@ -162,15 +195,24 @@ def recon_arm(arm, days=14, pool="top10"):
             continue
         df = pd.read_feather(f).sort_values("date").reset_index(drop=True)
         df["date"] = pd.to_datetime(df["date"], utc=True)
-        df = df[df["date"] >= since].reset_index(drop=True)
-        if df.empty:
-            continue
-        le = v2_long_entry(df)
-        for i in range(len(df)):
-            if not bool(le.iloc[i]):
+        # OI 的 mom30 需要历史 180 根，先保留全量算指标，再过滤窗口
+        full = df.reset_index(drop=True)
+        if arm == "v2":
+            ent = v2_long_entry(full)
+        else:  # oi
+            mf = METRICS / (p.replace("/", "_").replace(":", "_") + "-4h-metrics.feather")
+            mdf = pd.read_feather(mf) if mf.exists() else None
+            if mdf is not None:
+                mdf["date"] = pd.to_datetime(mdf["date"], utc=True)
+            ent = oi_flush_entry(full, mdf)
+        mask = full["date"] >= since
+        for i in range(len(full)):
+            if not bool(mask.iloc[i]):
                 continue
-            bar = df["date"].iloc[i]
-            entries.append({"pair": p, "bar": bar, "close": float(df["close"].iloc[i])})
+            if not bool(ent.iloc[i]):
+                continue
+            bar = full["date"].iloc[i]
+            entries.append({"pair": p, "bar": bar, "close": float(full["close"].iloc[i])})
 
     entry_bars = [{"pair": e["pair"], "bar": str(e["bar"])[:16], "close": round(e["close"], 6)} for e in entries]
     missed = []

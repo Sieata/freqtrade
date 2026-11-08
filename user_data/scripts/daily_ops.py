@@ -219,24 +219,27 @@ def main():
             alerts += 1
             print(f"    [!] {name} :{port} → 无响应（进程可能已退出，用 paper_start*.sh 重拉）")
 
-    # 5) paper 信号对账（V2 周末窗口 long_entry vs 实际开仓，揪重启漏单）
+    # 5) paper 信号对账（揪重启漏单）：V2 周末窗口 long_entry + OI 去杠杆 flush
     if not args.no_recon:
-        print("\n[5] paper 信号对账（V2 周末窗口 long_entry vs 实际开仓）")
+        print("\n[5] paper 信号对账（V2 周末窗口 long_entry / OI flush vs 实际开仓）")
         try:
             import paper_recon as PR
 
-            r = PR.recon_arm("v2", days=args.days, pool=args.pool)
-            print(
-                f"    最近 {args.days} 天：窗口内 long_entry {r['n_entries']} 个 | "
-                f"DB 实际开仓 {r['n_trades']} 笔 | bot 上线(≈) {r['first_heartbeat_utc']}"
-            )
-            if r["missed"]:
-                alerts += 1
-                print(f"    [!] 疑似漏单 {len(r['missed'])} 条（上线后窗口内信号、无对应 trade）：")
-                for m in r["missed"]:
-                    print(f"        {m['pair']:<18} {m['bar']} close={m['close']}")
-            else:
-                print("    [ok] 无上线后漏单")
+            for arm, label in (("v2", "V2 周末窗口"), ("oi", "OI 去杠杆 flush")):
+                r = PR.recon_arm(arm, days=args.days, pool=args.pool)
+                if r.get("skipped"):
+                    continue
+                print(
+                    f"    [{arm}] 最近 {args.days} 天：{label} 信号 {r['n_entries']} 个 | "
+                    f"DB 实际开仓 {r['n_trades']} 笔 | bot 上线(≈) {r['first_heartbeat_utc']}"
+                )
+                if r["missed"]:
+                    alerts += 1
+                    print(f"      [!] {arm} 疑似漏单 {len(r['missed'])} 条（上线后信号、无对应 trade）：")
+                    for m in r["missed"]:
+                        print(f"          {m['pair']:<18} {m['bar']} close={m['close']}")
+                else:
+                    print(f"      [ok] {arm} 无上线后漏单")
         except Exception as e:  # 缺数据/解析失败不致命
             print(f"    [!] 对账失败: {e}")
             alerts += 1

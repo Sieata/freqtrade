@@ -69,9 +69,41 @@ def test_long_entry_outside_window_false():
     assert bool(le.iloc[2]) is False
 
 
-def test_recon_oi_skipped():
-    r = PR.recon_arm("oi", 14)
-    assert r.get("skipped") is True
+def test_oi_flush_fires_on_crash_and_uptrend():
+    # 需 >=360 根才能让 oi_q 分位非 NaN(oi_min_periods=360)。用 400 根上涨趋势，
+    # 最后一根急跌约 6%(ret4<=-0.05)，metrics oi 最后一根急缩(oi_chg 极小 <= 分位)，
+    # 且 mom30 仍 > 0（跌后 close 仍高于 30 根前）-> flush=True。
+    n = 400
+    dates = pd.date_range("2026-01-01", periods=n, freq="4h", tz="UTC")
+    closes = [100.0 + i * 0.5 for i in range(n)]   # 每根 +0.5，趋势强，跌 6% 后仍高于 30 根前
+    df = _df(list(dates), closes)
+    oi = [1_000_000.0 + i for i in range(n)]
+    oi[-1] = 100_000.0  # 相对 6 根前巨幅缩水
+    mdf = pd.DataFrame({"date": dates, "oi_usd": oi})
+    df2 = df.copy()
+    df2.loc[df2.index[-1], "close"] = closes[-1] * 0.94  # 急跌 6%
+    flush2 = PR.oi_flush_entry(df2, mdf)
+    assert bool(flush2.iloc[-1]) is True
+
+
+def test_oi_flush_no_fire_without_crash():
+    # 平稳走势、oi 平稳 -> 无 flush
+    n = 400
+    dates = pd.date_range("2026-01-01", periods=n, freq="4h", tz="UTC")
+    df = _df(list(dates), [100.0] * n)
+    mdf = pd.DataFrame({"date": dates, "oi_usd": [1_000_000.0] * n})
+    flush = PR.oi_flush_entry(df, mdf)
+    assert not flush.any()
+
+
+def test_oi_constants_match_source():
+    # 锁住 OI 常量与冻结源码一致
+    assert PR.OI_QUANTILE == 0.05
+    assert PR.OI_WINDOW == 1080
+    assert PR.OI_MIN_PERIODS == 360
+    assert PR.OI_CRASH_THRESHOLD == -0.05
+    assert PR.OI_MOM_WINDOW == 180
+    assert PR.OI_SHIFT == 6
 
 
 def test_buy_drop_constant_matches_source():
