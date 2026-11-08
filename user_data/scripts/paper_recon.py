@@ -28,6 +28,11 @@ ARM_DB = {
     "v2": ROOT / "user_data" / "tradesv3.dryrun.sqlite",
     "oi": ROOT / "user_data" / "tradesv3.dryrun.oi.sqlite",
 }
+# 各臂实际 config（用于从 bot 实际白名单取对账品种；pool 文件是静态快照，可能与 live 白名单不符）
+ARM_CONFIG = {
+    "v2": ROOT / "user_data" / "config_paper_v2.json",
+    "oi": ROOT / "user_data" / "config_paper_oi.json",
+}
 # V2 入场参数默认值（WeekendReverseV2.py ClassVar，冻结不可改，这里复刻用于离线重放）
 V2_BUY_DROP = 0.02          # buy_drop 默认（WeekendReverseV2.py:69 DecimalParameter default=0.02）
 V2_BUY_WINDOW_MODE = "fri_mon"
@@ -44,6 +49,43 @@ def _kline_fname(pair, tf="4h"):
     return DATA / (pair.replace("/", "_").replace(":", "_") + f"-{tf}-futures.feather")
 
 
+# 各臂 live bot 端口（缺本地 feather 时从 bot 的 /pair_candles 取运行时 K 线，
+# 覆盖 BANK/CYS 等不在 TOP10 保鲜池、本地无 feather 但 whitelist 内实盘在用品种）。
+ARM_PORT = {"v2": 8080, "oi": 8082}
+_API_AUTH = ("freqtrader", "IUdQZFygM_n6weNX")
+
+
+def _fetch_kline_api(pair, arm, tf="4h", limit=1080):
+    """从 live bot 的 /api/v1/pair_candles 拉运行时 OHLCV（含策略指标，但只用 OHLCV 重放）。
+    失败返回 None（调用方按缺数据跳过）。"""
+    port = ARM_PORT.get(arm)
+    if port is None:
+        return None
+    try:
+        import requests
+        import pandas as pd
+    except Exception:
+        return None
+    try:
+        r = requests.get(
+            f"http://127.0.0.1:{port}/api/v1/pair_candles",
+            params={"pair": pair, "timeframe": tf, "limit": limit},
+            auth=_API_AUTH, timeout=15,
+        )
+        j = r.json()
+        cols = j.get("columns") or []
+        data = j.get("data") or []
+        if not cols or not data:
+            return None
+        df = pd.DataFrame(data, columns=cols)
+        keep = [c for c in ("date", "open", "high", "low", "close", "volume") if c in df.columns]
+        df = df[keep].copy()
+        df["date"] = pd.to_datetime(df["date"], utc=True)
+        return df.sort_values("date").reset_index(drop=True)
+    except Exception:
+        return None
+
+
 def _load_pool(name):
     f = ROOT / "user_data" / "universe" / f"pairs_{name}.txt"
     if not f.exists():
@@ -54,6 +96,36 @@ def _load_pool(name):
         if line:
             out.append(line)
     return out
+
+
+def _bot_whitelist(arm):
+    """取 live bot 实际交易的品种（/whitelist），失败回退 config 的 pair_whitelist。
+    recon 必须按 bot **实际** 白名单对账：TOP10 静态池与 V2 live 白名单不一致
+    （实测 V2 实跑 8 品种含 BANK/CYS，而 TOP10 池是 BNB/TRX/DOGE/XMR —— 用池文件会
+    漏查真实品种 + 空查未交易品种）。"""
+    port = ARM_PORT.get(arm)
+    if port is not None:
+        try:
+            import requests
+            r = requests.get(f"http://127.0.0.1:{port}/api/v1/whitelist",
+                             auth=_API_AUTH, timeout=10)
+            wl = r.json().get("whitelist") or []
+            if wl:
+                return wl
+        except Exception:
+            pass
+    # 回退读 config
+    cfg = ARM_CONFIG.get(arm)
+    if cfg and cfg.exists():
+        try:
+            import json as _json
+            c = _json.loads(cfg.read_text(encoding="utf-8"))
+            wl = (c.get("exchange") or {}).get("pair_whitelist")
+            if wl:
+                return wl
+        except Exception:
+            pass
+    return []
 
 
 def v2_window_mask(dates):
@@ -170,7 +242,12 @@ def recon_arm(arm, days=14, pool="top10"):
         }
 
     db = ARM_DB[arm]
-    pairs = _load_pool(pool)
+    # 优先用 live bot 实际白名单；取不到才退回静态 pool 文件
+    pairs = _bot_whitelist(arm)
+    pool_source = "bot_whitelist"
+    if not pairs:
+        pairs = _load_pool(pool)
+        pool_source = f"pool:{pool}"
     now = pd.Timestamp.now(tz="UTC")
     since = now - pd.Timedelta(days=days)
     trades = _trades_open_dates(db)
@@ -189,12 +266,30 @@ def recon_arm(arm, days=14, pool="top10"):
         hb_ts = hb_ts.floor("4h")
 
     entries = []
+    no_data = []  # 既无 feather 又取不到 API 的品种（显式记录，不再静默跳过）
+    api_pairs = []  # 靠 API 兜底参与对账的品种
+    stale_pairs = []  # feather 过期、改走 API 的品种
     for p in pairs:
         f = _kline_fname(p, "4h")
-        if not f.exists():
-            continue
-        df = pd.read_feather(f).sort_values("date").reset_index(drop=True)
-        df["date"] = pd.to_datetime(df["date"], utc=True)
+        df = None
+        if f.exists():
+            df = pd.read_feather(f).sort_values("date").reset_index(drop=True)
+            df["date"] = pd.to_datetime(df["date"], utc=True)
+            # feather 新鲜度检查：若末日早于窗口起点（陈旧，如 BANK/CYS 不在保鲜池会停在数周前），
+            # 直接用它会把近窗口当作"无信号/无数据"，对账形同虚设 → 改从 live bot API 取实时 K 线。
+            if df.empty or df["date"].iloc[-1] < since:
+                apidf = _fetch_kline_api(p, arm, "4h")
+                if apidf is not None and not apidf.empty:
+                    stale_pairs.append(p)
+                    df = apidf
+                    df = df[df["date"] >= since - pd.Timedelta(days=60)].reset_index(drop=True)
+        if df is None or df.empty:
+            # 本地无 feather 或已空 → 从 live bot API 取运行时 K 线
+            df = _fetch_kline_api(p, arm, "4h")
+            if df is None or df.empty:
+                no_data.append(p)
+                continue
+            api_pairs.append(p)
         # OI 的 mom30 需要历史 180 根，先保留全量算指标，再过滤窗口
         full = df.reset_index(drop=True)
         if arm == "v2":
@@ -231,6 +326,10 @@ def recon_arm(arm, days=14, pool="top10"):
         "days": days,
         "since": str(since)[:19],
         "pairs": len(pairs),
+        "pool_source": pool_source,
+        "via_api": api_pairs,
+        "stale_api": stale_pairs,
+        "no_data": no_data,
         "first_heartbeat_utc": str(hb_ts)[:19] if hb_ts is not None else None,
         "n_entries": len(entry_bars),
         "n_trades": len(trades),

@@ -110,3 +110,28 @@ def test_buy_drop_constant_matches_source():
     # 锁住常量与冻结源码一致（源码 DecimalParameter default=0.02）
     assert PR.V2_BUY_DROP == 0.02
     assert PR.V2_BUY_WINDOW_MODE == "fri_mon"
+
+
+def test_arm_config_registered():
+    # ARM_CONFIG 必须覆盖两臂且指向存在的 config（对账按 bot 实际白名单，需 config 兜底）
+    assert set(PR.ARM_CONFIG.keys()) == {"v2", "oi"}
+    for arm, p in PR.ARM_CONFIG.items():
+        assert p.exists(), f"{arm} config 缺失 {p}"
+
+
+def test_bot_whitelist_falls_back_to_config(monkeypatch):
+    # live API 取不到（monkeypatch requests 抛异常）时，应回退读 config 的 pair_whitelist
+    import requests as _rq
+
+    def _boom(*a, **k):
+        raise RuntimeError("no api")
+
+    monkeypatch.setattr(_rq, "get", _boom)
+    wl = PR._bot_whitelist("v2")
+    # config_paper_v2.json 的 pair_whitelist 非空，且不含静态 TOP10 的 BNB/DOGE 等
+    assert isinstance(wl, list) and len(wl) > 0
+    assert "BANK/USDT:USDT" in wl or "CYS/USDT:USDT" in wl
+
+
+def test_arm_port_registered():
+    assert PR.ARM_PORT == {"v2": 8080, "oi": 8082}
