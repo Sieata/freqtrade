@@ -48,11 +48,13 @@
 # paper forward-test（2026-11-08 起 V2+OI 两臂已在跑；进程随本机开机，重启后需重新拉起）
 ./user_data/scripts/paper_start.sh          # V2（端口 8080；内置 SHA 校验，不匹配拒绝启动）
 ./user_data/scripts/paper_start_oi.sh        # OIFlushV2（端口 8082；SHA 冻结校验；判据见 paper/FREEZE_OI.md）
-# ⚠️ 重启用分离式工具（会话/作业结束不会被连带杀掉，且按臂 scoped 清理不误杀）：
-#   .venv/Scripts/python.exe user_data/scripts/paper_restart.py [--only v2|oi] [--no-kill] [--dry-run]
-#   ——直接 `bash paper_start*.sh &` 或作为本会话后台 job 起会在会话结束时收到 SIGHUP 静默停跑；
-#      反复普通拉起还会残留多实例抢同一 db（实测 6+ 孤儿进程）。paper_restart 用
-#      DETACHED_PROCESS 起独立进程组解决。
+# ⚠️ 重启/常驻一律用分离式工具（Task Scheduler 承载，脱离会话 Job Object）：
+#   .venv/Scripts/python.exe user_data/scripts/paper_restart.py [--only v2|oi] [--no-kill] [--dry-run] [--status]
+#   ——直接 `bash paper_start*.sh &`、作为本会话后台 job、甚至 Popen(DETACHED_PROCESS) 拉起的进程
+#      仍属本会话执行器的 Windows Job Object，调用一结束 KILL_ON_JOB_CLOSE 会连整棵子树一起杀掉
+#      （实测两臂在两次调用之间双双消失、进程归零）。只有让计划任务(Task Scheduler 服务)承载
+#      bot 进程才真正脱离该 Join Object、关终端/会话结束都不影响。任务名固定 paper_v2/paper_oi，
+#      重启用 -Force 覆盖天然防重复；启动前做 SHA 完整性校验。
 ./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28；未启动）
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082→与OI冲突，未启动；FREEZE_BIGMOVE）
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报（支持 V2/OI/FS/BM）

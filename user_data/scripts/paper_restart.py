@@ -1,64 +1,91 @@
-"""paper 两臂（V2:8080 / OI:8082）分离式重启工具（2026-11-08）。
+"""paper 两臂（V2:8080 / OI:8082）分离式重启工具（2026-11-08，schtasks 版）。
 
-为什么需要它（轮 10 实操教训）：
-  - 直接用 `bash paper_start*.sh &` 或作为本会话后台 job 启动，进程会被绑在
-    调用者的进程树上，会话/作业结束就被 SIGHUP 连带杀掉 → paper 静默停跑。
-  - 反复用普通方式拉起会残留孤儿进程，多个实例抢同一个 db/端口（实测出现 6+ 个
-    freqtrade trade 进程）。
-  本工具用 Windows DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP 起一个全新的、
-  与会话无关的进程组，再调用已加固的 paper_start*.sh（内置 SHA 校验）。
-  启动前可选先清理既有 freqtrade trade 进程，保证每个端口只有一份。
+为什么需要它（轮 10 实操教训，逐层踩坑后定位根因）：
+  直接 `bash paper_start*.sh &`、或作为本会话后台 job、甚至 Popen(DETACHED_PROCESS)，
+  拉起的进程**仍属本会话 ops 执行器的 Windows Job Object**。该调用一结束，Job 的
+  KILL_ON_JOB_CLOSE 会把整棵子进程树（含"已分离"的孙子进程）一起杀掉 → paper 静默停跑
+  （实测：两臂在两次调用之间双双消失、进程数归零）。反复普通拉起还会残留多实例抢同一 db。
+
+  唯一可靠的办法：让 **Windows 计划任务（Task Scheduler 服务）** 承载 bot 进程。任务动作
+  直接是"venv python -m freqtrade trade …"（长驻），任务状态保持 Running；它不属于任何
+  交互式会话的 Job Object，本会话结束/关终端都不影响。
+
+设计：
+  - SHA 校验在本工具里做（读 strategies/<S>.py 计算 SHA256 与冻结值比对），不匹配拒绝启动。
+    冻结值：V2 见 FREEZE_V2.md，OI 见 FREEZE_OI.md（下方 FROZEN 字典）。
+  - 每个臂注册一个计划任务 paper_v2 / paper_oi（固定名，重启用 -Force 覆盖，天然防重复）。
+  - bot 直接写自己的 logfile；stdout 不便于持久化，故任务动作里重定向到 *_launcher.log。
+  - --only v2|oi 按 config 文件名 scoped 清理，重启一臂不误杀另一臂。
 
 用法（项目根目录）：
-  .venv/Scripts/python.exe user_data/scripts/paper_restart.py            # 两臂都重启
+  .venv/Scripts/python.exe user_data/scripts/paper_restart.py                # 两臂都重启
   .venv/Scripts/python.exe user_data/scripts/paper_restart.py --only v2
-  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --only oi
-  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --no-kill  # 不清理旧的
-  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --dry-run  # 只打印将做什么
+  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --no-kill
+  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --dry-run
+  .venv/Scripts/python.exe user_data/scripts/paper_restart.py --status        # 只看状态
 
-只做进程管理，不碰策略源码/数据/交易；不读 VAL。
+只做进程管理 + SHA 完整性校验，不碰策略源码/数据/交易；不读 VAL。
 """
 import argparse
-import os
-import shutil
+import hashlib
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPTS = ROOT / "user_data" / "scripts"
+STRAT_DIR = ROOT / "user_data" / "strategies"
 LOGS = ROOT / "user_data" / "logs"
+VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 
-# DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP（Windows）
-_CREATE_FLAGS = 0x00000008 | 0x00000200
-
-BOTS = {
-    "v2": SCRIPTS / "paper_start.sh",
-    "oi": SCRIPTS / "paper_start_oi.sh",
+# 每臂定义：策略类名、config 文件、端口、db、冻结 SHA（=源码 SHA256）
+ARMS = {
+    "v2": {
+        "strategy": "WeekendReverseV2",
+        "config": "user_data/config_paper_v2.json",
+        "port": 8080,
+        "db": "user_data/tradesv3.dryrun.sqlite",
+        "frozen": "1b90c90bb7873500a30e8f821713935f497a018d28736596fdaa6f97743b46d1",
+    },
+    "oi": {
+        "strategy": "OIFlushV2",
+        "config": "user_data/config_paper_oi.json",
+        "port": 8082,
+        "db": "user_data/tradesv3.dryrun.oi.sqlite",
+        "frozen": "d714e0922be084932f2fe477a52a755b0507f9ebb01699830d2e45d154dc5a98",
+    },
 }
 
-PINGS = {
-    "v2": ("http://127.0.0.1:8080/api/v1/ping", 8080),
-    "oi": ("http://127.0.0.1:8082/api/v1/ping", 8082),
-}
+USER = "freqtrader"
+PASS = "IUdQZFygM_n6weNX"
+
+
+def _src_sha(strategy):
+    p = STRAT_DIR / f"{strategy}.py"
+    if not p.exists():
+        return None
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def _ping(arm, timeout=2.5):
+    url = f"http://127.0.0.1:{ARMS[arm]['port']}/api/v1/ping"
+    try:
+        import requests
+
+        r = requests.get(url, timeout=timeout, auth=(USER, PASS))
+        return r.status_code == 200 and r.json().get("status") == "pong"
+    except Exception:
+        return False
 
 
 def _kill_existing(only=None):
-    """杀掉 freqtrade ... trade 进程（含其 fork 子进程树）。
-
-    only=None 时杀掉所有臂；only='v2'/'oi' 时只杀对应臂（按 config 文件名匹配，
-    v2→config_paper_v2.json, oi→config_paper_oi.json），避免重启一个臂时误杀另一个。
-    返回杀掉的 PID 列表。
-    """
+    """杀 freqtrade trade 进程；only 时按 config 文件名 scoped。返回 PID 列表。"""
     try:
         import psutil
     except Exception:
-        print("[!] 未安装 psutil，跳过清理（可能残留旧进程）")
+        print("[!] 未安装 psutil，跳过清理")
         return []
-    needle = None
-    if only:
-        needle = f"config_paper_{only}.json"
+    needle = f"config_paper_{only}.json" if only else None
     killed = []
     for p in psutil.process_iter(["pid", "cmdline"]):
         cl = p.info.get("cmdline") or []
@@ -75,95 +102,136 @@ def _kill_existing(only=None):
     return killed
 
 
-def _ping(name, timeout=2.0):
-    url, _ = PINGS[name]
-    try:
-        import requests
-
-        r = requests.get(url, timeout=timeout, auth=("freqtrader", "IUdQZFygM_n6weNX"))
-        return r.status_code == 200 and r.json().get("status") == "pong"
-    except Exception:
-        return False
+def _task_name(arm):
+    return f"paper_{arm}"
 
 
-def _launch(name, dry_run=False):
-    """分离式启动一个臂。返回 launcher 的 PID（或 None）。"""
-    script = BOTS[name]
-    if not script.exists():
-        print(f"[!] launcher 不存在: {script}")
-        return None
-    bash = shutil.which("bash")
-    if not bash:
-        print("[!] PATH 中找不到 bash，无法启动")
-        return None
-    LOGS.mkdir(parents=True, exist_ok=True)
-    logpath = LOGS / f"paper_{name}_launcher.log"
-    if dry_run:
-        print(f"[dry-run] 将分离启动 {name}: {bash} -c 'cd {ROOT} && bash {script}' >> {logpath}")
-        return None
-    log = open(logpath, "wb")
-    # 关键坑（轮 10 实测，winuxcmd/MSYS bash）：若把 launcher 用绝对 /c/... 路径传给
-    # `bash <script>`，bash 会把该参数再转成 Windows 反斜杠 'C:\...'，使 launcher 里
-    # 的 case */* 判断失配 → ROOT 解析错（丢到 /c/Users/fs2023）。因此改用它自己的
-    # cwd 相对路径（与手动 `bash user_data/scripts/paper_start.sh` 完全一致）。
-    rel_script = script.relative_to(ROOT).as_posix()
-    inner = f"bash '{rel_script}'"
-    p = subprocess.Popen(
-        [bash, "-c", inner],
-        stdout=log,
-        stderr=log,
-        stdin=subprocess.DEVNULL,
-        creationflags=_CREATE_FLAGS,
-        cwd=str(ROOT),
+def _ps_run(script, timeout=90):
+    r = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
     )
-    return p.pid
+    return r.returncode, (r.stdout or "") + "\n" + (r.stderr or "")
+
+
+def _launch(arm, dry_run=False):
+    """注册并启动计划任务（动作=直接跑 freqtrade）。返回 task 名或 None。"""
+    info = ARMS[arm]
+    # 1) SHA 完整性校验（forward-test 期间源码不得改动）
+    cur = _src_sha(info["strategy"])
+    if cur is None:
+        print(f"[!] {arm}: 策略源文件缺失 {info['strategy']}.py")
+        return None
+    if cur != info["frozen"]:
+        print(f"[!] {arm}: {info['strategy']}.py SHA 漂移，拒绝启动（forward-test 作废）")
+        print(f"    expected {info['frozen']}")
+        print(f"    current  {cur}")
+        return None
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    task = _task_name(arm)
+    logfile = f"user_data/logs/paper_{arm}_forwardtest.log"
+    stdout = f"user_data/logs/paper_{arm}_launcher.log"
+    py = str(VENV_PY)
+    cfg = info["config"]
+    strat = info["strategy"]
+
+    if dry_run:
+        print(f"[dry-run] {arm}: 计划任务 {task} 将运行")
+        print(f"    {py} -m freqtrade trade --config {cfg} --strategy {strat} --logfile {logfile}")
+        return None
+
+    # 任务动作直接是 python（长驻），stdout/stderr 重定向到 launcher.log。
+    # 用 cmd /c 包一层以便重定向；WorkingDirectory=仓库根使相对 --config/--logfile 生效。
+    arg = (
+        f'/c ""{py}" -m freqtrade trade --config {cfg} --strategy {strat} '
+        f'--logfile {logfile} >> {stdout} 2>&1"'
+    )
+    ps = f"""
+$ErrorActionPreference='Stop'
+$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '{arg}' -WorkingDirectory '{ROOT}'
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(12)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName '{task}' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName '{task}'
+Write-Output 'TASK_STARTED {task}'
+"""
+    rc, out = _ps_run(ps)
+    if rc != 0 or "TASK_STARTED" not in out:
+        print(f"[!] {arm}: 计划任务启动失败 rc={rc}\n{out.strip()[:400]}")
+        return None
+    return task
+
+
+def _status(arm):
+    rc, out = _ps_run(
+        f"(Get-ScheduledTask -TaskName 'paper_{arm}' -ErrorAction SilentlyContinue).State"
+    )
+    state = out.strip().splitlines()[0] if out.strip() else "None"
+    return state, _ping(arm)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="paper 两臂分离式重启（V2/OI）")
-    ap.add_argument("--only", choices=["v2", "oi"], help="只重启某一个臂（默认两臂都重启）")
+    ap = argparse.ArgumentParser(description="paper 两臂分离式重启（schtasks 承载，V2/OI）")
+    ap.add_argument("--only", choices=["v2", "oi"], help="只重启某一个臂")
     ap.add_argument("--no-kill", action="store_true", help="不清理既有 freqtrade trade 进程")
     ap.add_argument("--dry-run", action="store_true", help="只打印将执行的动作")
-    ap.add_argument("--wait", type=int, default=12, help="启动后等待秒数（默认 12）")
+    ap.add_argument("--status", action="store_true", help="只查看状态，不重启")
+    ap.add_argument("--wait", type=int, default=60, help="启动后最长等待秒数（默认 60，轮询探活）")
     args = ap.parse_args()
 
-    names = [args.only] if args.only else list(BOTS.keys())
+    names = [args.only] if args.only else list(ARMS.keys())
 
     print("=" * 60)
-    print("paper 两臂分离式重启")
+    print("paper 两臂分离式重启（Task Scheduler 承载）")
     print("=" * 60)
+
+    if args.status:
+        for n in names:
+            state, alive = _status(n)
+            print(f"    {n:>3} :{ARMS[n]['port']}  任务状态={state}  存活={'pong ✓' if alive else '无响应 ✗'}")
+        return
 
     if not args.no_kill:
         killed = _kill_existing(only=args.only)
-        scope = args.only or "全部"
-        print(f"[kill] 清理既有 freqtrade trade 进程（{scope}）: {killed if killed else '无'}")
+        print(f"[kill] 清理既有 freqtrade trade 进程（{args.only or '全部'}）: {killed if killed else '无'}")
         if killed and not args.dry_run:
             time.sleep(3)
     else:
         print("[kill] 跳过清理（--no-kill）")
 
     for n in names:
-        pid = _launch(n, dry_run=args.dry_run)
-        if pid:
-            print(f"[start] {n} launcher 已分离启动 (PID {pid})，日志 user_data/logs/paper_{n}_launcher.log")
+        task = _launch(n, dry_run=args.dry_run)
+        if task:
+            print(f"[start] {n} 计划任务已注册并启动 ({task})，见 user_data/logs/paper_{n}_forwardtest.log")
         elif not args.dry_run:
             print(f"[!] {n} 启动失败")
 
     if args.dry_run:
         return
 
-    print(f"[wait] 等待 {args.wait}s 后探活…")
-    time.sleep(args.wait)
+    deadline = time.time() + args.wait
+    status = {n: False for n in names}
+    while time.time() < deadline:
+        for n in names:
+            if not status[n] and _ping(n):
+                status[n] = True
+        if all(status.values()):
+            break
+        time.sleep(3)
+
     ok = 0
     for n in names:
-        alive = _ping(n)
-        print(f"    {n:>3} :{PINGS[n][1]} → {'pong ✓' if alive else '无响应 ✗'}")
+        alive = status[n]
+        print(f"    {n:>3} :{ARMS[n]['port']} → {'pong ✓' if alive else '无响应 ✗'}")
         ok += 1 if alive else 0
     print("-" * 60)
     if ok == len(names):
         print(f"结论：{len(names)} 个臂全部存活")
         sys.exit(0)
-    print(f"结论：{len(names) - ok} 个臂未存活，检查 user_data/logs/paper_*_launcher.log")
+    print(f"结论：{len(names) - ok} 个臂未存活，检查计划任务与 user_data/logs/paper_*_launcher.log")
     sys.exit(1)
 
 
