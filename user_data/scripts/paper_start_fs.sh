@@ -42,8 +42,8 @@ fi
 cd "$ROOT"   # 保证相对路径(db_url/logs)统一解析到项目根
 
 # 3. 后台启动 dry-run（输出已重定向到日志，disown 防 SIGHUP，无需 nohup）
-"$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
-    --logfile "$LOGFILE" > "$LOGDIR/paper_fs_stdout.log" 2>&1 &
+"$PY" -m freqtrade trade --config user_data/config_paper_fs.json --strategy "$STRATEGY" \
+    --logfile user_data/logs/paper_fs_forwardtest.log > user_data/logs/paper_fs_stdout.log 2>&1 &
 PID=$!
 disown
 

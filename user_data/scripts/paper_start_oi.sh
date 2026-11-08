@@ -46,8 +46,10 @@ cd "$ROOT"   # 保证相对路径(db_url/logs)统一解析到项目根
 echo "[i] 提示：启动前请确保已跑 ./refresh_all.sh（OI 累积器需每日人工跑，漏跑即永久缺口）"
 
 # 4. 后台启动 dry-run（输出已重定向到日志，disown 防 SIGHUP，无需 nohup）
-"$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
-    --logfile "$LOGFILE" > "$LOGDIR/paper_oi_stdout.log" 2>&1 &
+# Windows Git Bash: $ROOT 是 MSYS 形式 /c/Users/...，直接传给 Windows python 的
+# --config 会被解释成 \c\Users\... 而报 not found。已 cd 到 ROOT，这里改用相对路径。
+"$PY" -m freqtrade trade --config user_data/config_paper_oi.json --strategy "$STRATEGY" \
+    --logfile user_data/logs/paper_oi_forwardtest.log > user_data/logs/paper_oi_stdout.log 2>&1 &
 PID=$!
 disown
 

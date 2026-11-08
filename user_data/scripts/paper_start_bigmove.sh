@@ -42,8 +42,8 @@ mkdir -p "$LOGDIR"
 cd "$ROOT"   # 保证相对路径(db_url/logs)统一解析到项目根
 
 # 3. 后台启动 dry-run
-nohup "$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
-    --logfile "$LOGFILE" > "$LOGDIR/paper_bigmove_stdout.log" 2>&1 &
+nohup "$PY" -m freqtrade trade --config user_data/config_paper_bigmove.json --strategy "$STRATEGY" \
+    --logfile user_data/logs/paper_bigmove_forwardtest.log > user_data/logs/paper_bigmove_stdout.log 2>&1 &
 PID=$!
 disown
 

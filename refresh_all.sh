@@ -8,8 +8,8 @@
 #   FT_PROXY=none ./refresh_all.sh                    # 强制直连
 #
 # 说明：
-#   - --pool 只作用于 [1/4] K线/funding 与 [4/4] 接缝校验（校验按该池）；
-#   - [2/4] OI 累积器固定按自己的默认 13 品种；[3/4] metrics 固定 TOP10
+#   - --pool 只作用于 [1/5] K线/funding 与 [5/5] 接缝校验（校验按该池）；
+#   - [2/5] OI 累积器固定按自己的默认 13 品种；[3/5] metrics 固定 TOP10
 #     （core/volume 全量补 metrics 要拉数千个日包，评估用不到，故不随池变化）；
 #   - 非 TOP10 池的接缝校验带 --no-metrics，只看 K线，避免 metrics 滞后误报。
 #
@@ -71,21 +71,27 @@ FAIL=0
 
 echo "池: $POOL（$POOL_FILE）"
 echo
-echo "── [1/4] K线/funding 增量（$POOL）──"
+echo "── [1/5] K线/funding 增量（$POOL）──"
 ./ensure-data.sh "$POOL_FILE" || { echo "[!] ensure-data 失败（继续其他步骤）" >&2; FAIL=1; }
 
 echo
-echo "── [2/4] OI 累积器（OIFlush live 前置，漏跑不可回补；固定 13 品种）──"
+echo "── [2/5] OI 累积器（OIFlush live 前置，漏跑不可回补；固定 13 品种）──"
 "$PY" user_data/scripts/oi_accumulate.py || { echo "[!] oi_accumulate 失败" >&2; FAIL=1; }
 
 echo
-echo "── [3/4] metrics 月度增量（固定 TOP10 品种）──"
+echo "── [3/5] metrics 月度增量（固定 TOP10 品种）──"
 "$PY" user_data/scripts/import_metrics_vision.py BTC ETH BNB XRP SOL TRX HYPE ZEC DOGE XMR \
     | "$PY" -c "import sys; ls = sys.stdin.readlines(); print(''.join(ls[-10:]), end='')" \
     || { echo "[!] metrics 导入失败" >&2; FAIL=1; }
 
 echo
-echo "── [4/4] 接缝校验 + 最新数据日期（$POOL）──"
+echo "── [4/5] OI 尾巴并入 metrics（vision 滞后 1-2 天，用累积器补到当日；只追加不改历史）──"
+"$PY" user_data/scripts/sync_oi_to_metrics.py \
+    | "$PY" -c "import sys; ls = sys.stdin.readlines(); print(''.join(ls[-12:]), end='')" \
+    || { echo "[!] OI 尾巴并入失败" >&2; FAIL=1; }
+
+echo
+echo "── [5/5] 接缝校验 + 最新数据日期（$POOL）──"
 CHECK_ARGS=(--pools "$POOL")
 [ "$POOL" = "top10" ] || CHECK_ARGS+=(--no-metrics)
 if ! "$PY" user_data/scripts/data_check.py "${CHECK_ARGS[@]}"; then
