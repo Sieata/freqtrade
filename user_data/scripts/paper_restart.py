@@ -107,6 +107,11 @@ def _task_name(arm):
     return f"paper_{arm}"
 
 
+def _sch_raw(args, timeout=60):
+    r = subprocess.run(["schtasks.exe"] + args, capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
 def _ps_run(script, timeout=90):
     r = subprocess.run(
         ["powershell.exe", "-NoProfile", "-Command", script],
@@ -115,6 +120,59 @@ def _ps_run(script, timeout=90):
         timeout=timeout,
     )
     return r.returncode, (r.stdout or "") + "\n" + (r.stderr or "")
+
+
+def _patch_settings_xml(xml):
+    """纯函数：把 schedule task XML 的电池/空闲设置改 safe + 加 PT0S 执行时限。"""
+    import re
+    xml = re.sub(r"<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>",
+                 "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>", xml)
+    xml = re.sub(r"<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>",
+                 "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>", xml)
+    xml = re.sub(r"<StopOnIdleEnd>true</StopOnIdleEnd>",
+                 "<StopOnIdleEnd>false</StopOnIdleEnd>", xml)
+    if "<ExecutionTimeLimit>" in xml:
+        xml = re.sub(r"<ExecutionTimeLimit>[^<]*</ExecutionTimeLimit>",
+                     "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", xml)
+    else:
+        xml = xml.replace("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+                          "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+                          "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>")
+    return xml
+
+
+def _harden_task(task):
+    """把 schtasks /Create 默认 Settings 改成适合常驻守护进程的值（2026-11-08 轮42 修复）。
+
+    问题：`schtasks /Create /SC MINUTE /MO 30` 生成的默认 Settings 含
+      DisallowStartIfOnBatteries=true / StopIfGoingOnBatteries=true / StopOnIdleEnd=true，
+    且无 ExecutionTimeLimit 覆盖（默认 72h 会强杀长跑进程）。StopOnIdleEnd=true 会让
+    bot 在任何"系统离开空闲态"（用户操作）时被停 —— 实测两臂曾同时无声死亡
+    （Last Result 0xC000013A = STATUS_CONTROL_C_EXIT，日志无报错，外部终止特征）。
+
+    修法（非管理员可用）：导出 XML → 三处电池/空闲设置改 false + 加 ExecutionTimeLimit=PT0S
+    （无限）→ 清空行、转 UTF-16（schtasks /XML 只认 UTF-16，UTF-8 报"无法切换编码"）→
+    /Create /XML /F 重建。返回 (ok, msg)。
+    """
+    import re
+    import tempfile
+    rc, out = _sch_raw(["/Query", "/TN", task, "/XML"])
+    if rc != 0 or "<Task" not in out:
+        return False, f"导出 XML 失败 rc={rc}: {out.strip()[:200]}"
+    xml = _patch_settings_xml(out)
+    # 去掉 Query 输出里的空行，编码声明与实际写入(UTF-16)一致
+    lines = [ln for ln in xml.splitlines() if ln.strip()]
+    txt = "\n".join(lines).replace('encoding="UTF-8"', 'encoding="UTF-16"')
+    tmp = Path(tempfile.gettempdir()) / f"_{task}_harden.xml"
+    tmp.write_text(txt, encoding="utf-16")
+    rc, out = _sch_raw(["/Create", "/TN", task, "/XML", str(tmp), "/F"])
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    if rc != 0 or "SUCCESS" not in out.upper():
+        return False, f"重建失败 rc={rc}: {out.strip()[:200]}"
+    return True, "safe settings applied"
 
 
 def _launch(arm, dry_run=False):
@@ -161,19 +219,23 @@ def _launch(arm, dry_run=False):
     )
 
     def _sch(args, timeout=60):
-        r = subprocess.run(["schtasks.exe"] + args, capture_output=True, text=True, timeout=timeout)
-        return r.returncode, (r.stdout or "") + (r.stderr or "")
+        return _sch_raw(args, timeout=timeout)
 
     _sch(["/Delete", "/TN", task, "/F"])  # 容忍不存在
     rc, out = _sch(["/Create", "/TN", task, "/TR", str(bat), "/SC", "MINUTE", "/MO", "30", "/F"])
     if rc != 0 or "SUCCESS" not in out.upper():
         print(f"[!] {arm}: 计划任务创建失败 rc={rc}\n{out.strip()[:400]}")
         return None
+    # 关键：schtasks 默认 Settings 会在电池/空闲切换时停任务、且无 PT0S 执行时限 →
+    # 常驻守护进程被误杀（实测两臂曾同时无声死亡）。重建为 safe settings。
+    h_ok, h_msg = _harden_task(task)
+    if not h_ok:
+        print(f"[!] {arm}: 任务已创建但加固失败（settings 可能致意外停机）: {h_msg}")
     rc, out = _sch(["/Run", "/TN", task])
     if rc != 0 or "SUCCESS" not in out.upper():
         print(f"[!] {arm}: 计划任务启动失败 rc={rc}\n{out.strip()[:400]}")
         return None
-    print(f"[task] {arm}: 已注册 {task}（/SC MINUTE /MO 30, .bat 包装）并启动")
+    print(f"[task] {arm}: 已注册 {task}（/SC MINUTE /MO 30, .bat 包装, safe settings）并启动")
     return task
 
 

@@ -44,3 +44,31 @@ def test_kill_scoped_needle_construction():
 def test_kill_existing_no_match_returns_empty():
     res = P._kill_existing(only="__nonexistent_arm__")
     assert res == []
+
+
+def test_patch_settings_xml_fixes_daemon_killers():
+    """轮42：默认 Settings 的电池/空闲设置会误杀常驻 bot，须全部改 false + PT0S。"""
+    xml = (
+        "<Task><Settings>"
+        "<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>"
+        "<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>"
+        "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+        "<ExecutionTimeLimit>PT72H</ExecutionTimeLimit>"
+        "<IdleSettings><StopOnIdleEnd>true</StopOnIdleEnd></IdleSettings>"
+        "</Settings></Task>"
+    )
+    out = P._patch_settings_xml(xml)
+    assert "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" in out
+    assert "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" in out
+    assert "<StopOnIdleEnd>false</StopOnIdleEnd>" in out
+    assert "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" in out
+    assert "true</DisallowStartIfOnBatteries>" not in out
+
+
+def test_patch_settings_xml_adds_execution_limit_when_absent():
+    """XML 无 ExecutionTimeLimit 时应补 PT0S（无限），避免默认 72h 强杀。"""
+    xml = ("<Task><Settings>"
+           "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+           "</Settings></Task>")
+    out = P._patch_settings_xml(xml)
+    assert "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" in out

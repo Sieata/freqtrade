@@ -65,6 +65,14 @@
 #       一律写 .bat 包装（user_data/scripts/_run_paper_<arm>.bat，由 paper_restart.py 自动生成），
 #       /TR 只指向 .bat 绝对路径。
 #     · `--dry-run` 绝不清理进程（历史 bug：曾误杀在跑的 bot，已修）。
+#     · ⚠️ 默认 Settings 会误杀常驻 bot（2026-11-08 轮42 实测两臂曾同一时刻无声死亡，
+#       Last Result=0xC000013A=STATUS_CONTROL_C_EXIT，日志无报错=外部终止特征）：schtasks
+#       /Create 默认 Settings 含 DisallowStartIfOnBatteries / StopIfGoingOnBatteries /
+#       StopOnIdleEnd=true（系统电池/空闲态切换即停任务）、ExecutionTimeLimit 默认 72h（长跑被强杀）。
+#       → paper_restart.py 现于 /Create 后自动 **重写 XML 加固**：三处电池/空闲改 false +
+#       ExecutionTimeLimit=PT0S(无限)，再 `schtasks /Create /XML /F` 重建（_harden_task）。
+#       注：schtasks /XML 只认 UTF-16 编码，UTF-8 报"无法切换编码"；导出 XML 须去空行。改任务
+#       Settings 无 /Change 开关可及，只能 XML 导出→改→导入（非管理员可做）。
 # 数据保鲜每日计划任务（2026-11-08 起，脱离会话自动跑；防 OI metrics 冻结致 OI bot 静默零信号）：
 #   .venv/Scripts/python.exe user_data/scripts/paper_refresh_task.py [--at 09:10] [--status] [--unregister] [--dry-run]
 #   任务名 paper_refresh，动作=Git bash 执行 refresh_all.sh --pool top10，日志 user_data/logs/paper_refresh_launcher.log
