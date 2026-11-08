@@ -184,3 +184,21 @@ V2 同配置复跑（`--cache none`，8 品种，`20220101-20260921`）：
    （账户口径），与本文档口径（钱包口径 `max_relative_drawdown`）不是同一个量——
    同一次回测 20.2% vs 32.1%，照抄会严重低估风险。现改为 `ddW`/`ddA` 并列输出，
    并顺带修掉一直显示 `[?]` 的 timerange（改从 backtest_start/end 推导）。
+
+### 第九节 live 管线一致性对账（2026-11-08 轮39）
+
+**目的**：确认生产 bot（:8080）实跑的入场信号与冻结源码逻辑逐 bar 一致——forward-test 的
+任何判读都必须建立在"bot 确实在跑被验证的那份逻辑"之上。
+
+**方法**：从 live bot `/api/v1/pair_candles?pair=...&timeframe=4h&limit=300` 取 8 个 whitelist
+品种各 300 根已收盘 4h bar（bot 自身 OHLCV + 运行时 `long_entry` 列），用 V2 冻结逻辑
+（`WeekendReverseV2.py:108-114`，默认参数 buy_drop=0.02 / drop2=body=vol=rsi=0 / window=fri_mon）
+离线复刻 `long_entry = (ret_1p.shift(1) < -0.02) & (close>open) & (ret_1p >= -0.02) & (volume>0) & window`，
+逐 bar 比对（仅比对 startup 后 ema20 非空的行）。
+
+**结果**：8 品种 × 300 bar = **2400 bars，mismatch = 0（一致性 100.000%）**。
+live 触发信号数：ETH 1 / ZEC 9 / BANK 5 / CYS 12 / HYPE 3 / 其余 0，与离线复刻逐一相等。
+
+**结论**：live V2 管线与冻结逻辑**逐 bar 完全一致**，无指标/窗口/阈值漂移。结合 OI 臂第七节
+（10/10 品种 oi_q/flush 逐位一致），**两臂在生产端均已证实忠实复刻各自的冻结策略**。
+纯验证，无源码/配置变更。
