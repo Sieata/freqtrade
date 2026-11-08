@@ -36,6 +36,15 @@ FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–7
 > 跨会话/重启后需用 `./user_data/scripts/paper_start.sh`（V2）与 `paper_start_oi.sh`（OI）
 > 重新拉起；是否长期在线取决于本机是否持续开机。截至本次提交两臂 0 笔平仓（属正常空窗，
 > 判据需 3 个月 / 20+ 笔）。
+>
+> 🔧 **2026-11-08 补：进程承载方式改为 Windows 计划任务（schtasks）**。直接 `bash paper_start*.sh &`、
+> 后台 job、甚至 `Popen(DETACHED_PROCESS)` 拉起的进程都仍属本会话 ops 执行器的 Windows Job Object，
+> 调用一结束即被 KILL_ON_JOB_CLOSE 连子树杀掉（实测两臂在两次调用之间双双消失、进程数归零）。
+> 唯一可靠解：让 Task Scheduler 服务承载 bot 进程（任务名 paper_v2 / paper_oi，-Force 防重复、
+> 启动前 SHA 校验）。统一入口 `paper_restart.py [--only v2|oi] [--status]`，实测两臂任务 Running、
+> 端口 pong、跨多次 shell 调用存活。**仍绑本机开机；机器重启后需重跑 paper_restart.py 重拉。**
+> 数据侧确认：OI 十品种 metrics 已同步到 2026-11-08 04:00（sync_oi_to_metrics 追加尾巴），
+> 离线重算 oi_chg/oi_q 全部有效、当前无品种落入 flush 区（ZEC -0.041 vs 阈值 -0.111 最近）。
 
 **待决（2026-10-22 重排：实盘问题全部搁置）**
 
