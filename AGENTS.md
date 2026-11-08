@@ -55,6 +55,9 @@
 #      （实测两臂在两次调用之间双双消失、进程归零）。只有让计划任务(Task Scheduler 服务)承载
 #      bot 进程才真正脱离该 Join Object、关终端/会话结束都不影响。任务名固定 paper_v2/paper_oi，
 #      重启用 -Force 覆盖天然防重复；启动前做 SHA 完整性校验。
+# 数据保鲜每日计划任务（2026-11-08 起，脱离会话自动跑；防 OI metrics 冻结致 OI bot 静默零信号）：
+#   .venv/Scripts/python.exe user_data/scripts/paper_refresh_task.py [--at 09:10] [--status] [--unregister] [--dry-run]
+#   任务名 paper_refresh，动作=Git bash 执行 refresh_all.sh --pool top10，日志 user_data/logs/paper_refresh_launcher.log
 ./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28；未启动）
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082→与OI冲突，未启动；FREEZE_BIGMOVE）
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报（支持 V2/OI/FS/BM）
