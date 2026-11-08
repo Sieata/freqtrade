@@ -54,7 +54,17 @@
 #      仍属本会话执行器的 Windows Job Object，调用一结束 KILL_ON_JOB_CLOSE 会连整棵子树一起杀掉
 #      （实测两臂在两次调用之间双双消失、进程归零）。只有让计划任务(Task Scheduler 服务)承载
 #      bot 进程才真正脱离该 Join Object、关终端/会话结束都不影响。任务名固定 paper_v2/paper_oi，
-#      重启用 -Force 覆盖天然防重复；启动前做 SHA 完整性校验。
+#      启动前做 SHA 完整性校验，重注册前先杀孤儿 python（Stop-ScheduledTask 不杀 python 子进程！）。
+#   计划任务踩坑与最终方案（2026-11-08，全部实测）：
+#     · 本机当前用户 fs2023 非管理员：`Register-ScheduledTask -Force` 修改/新建任务、以及
+#       `schtasks /SC ONSTART`（特权开机触发）一律报 Access is denied；`-AtStartup` 同理。
+#     · 唯一无管理员可靠路径 = `schtasks.exe /Create /F /SC MINUTE /MO 30`（用户级、每 30 分钟
+#       重复）。bot 崩溃→任务转 Ready→下次 :00/:30 重复自动重拉（自愈）；schtasks 默认单实例，
+#       任务 Running 时重复触发被拒，不会双开同一 db。paper_restart.py 已改走此路径。
+#     · schtasks 内联 /TR 含 `cmd /c ""...""` 嵌套引号 + >> 重定向会 Last Result=1 失败；
+#       一律写 .bat 包装（user_data/scripts/_run_paper_<arm>.bat，由 paper_restart.py 自动生成），
+#       /TR 只指向 .bat 绝对路径。
+#     · `--dry-run` 绝不清理进程（历史 bug：曾误杀在跑的 bot，已修）。
 # 数据保鲜每日计划任务（2026-11-08 起，脱离会话自动跑；防 OI metrics 冻结致 OI bot 静默零信号）：
 #   .venv/Scripts/python.exe user_data/scripts/paper_refresh_task.py [--at 09:10] [--status] [--unregister] [--dry-run]
 #   任务名 paper_refresh，动作=Git bash 执行 refresh_all.sh --pool top10，日志 user_data/logs/paper_refresh_launcher.log

@@ -35,6 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 STRAT_DIR = ROOT / "user_data" / "strategies"
+SCRIPTS = ROOT / "user_data" / "scripts"
 LOGS = ROOT / "user_data" / "logs"
 VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
 
@@ -143,25 +144,36 @@ def _launch(arm, dry_run=False):
         print(f"    {py} -m freqtrade trade --config {cfg} --strategy {strat} --logfile {logfile}")
         return None
 
-    # 任务动作直接是 python（长驻），stdout/stderr 重定向到 launcher.log。
-    # 用 cmd /c 包一层以便重定向；WorkingDirectory=仓库根使相对 --config/--logfile 生效。
-    arg = (
-        f'/c ""{py}" -m freqtrade trade --config {cfg} --strategy {strat} '
-        f'--logfile {logfile} >> {stdout} 2>&1"'
+    # --- 关键设计（2026-11-08 重构，见 AGENTS.md 教训）---
+    # ① 非管理员 fs2023 下 `Register-ScheduledTask -Force` 修改/新建任务会 Access denied，
+    #    且 /SC ONSTART 特权触发同样需管理员。唯一无管理员可靠路径 = schtasks.exe /Create /F
+    #    配 /SC MINUTE /MO 30（用户级、每 30 分钟重复；bot 崩溃后下一次重复自动拉起 = 自愈；
+    #    schtasks 默认单实例：任务仍 Running 时重复触发被拒，不会双开同一 db）。
+    # ② schtasks 内联 /TR 含 `cmd /c ""...""` 嵌套引号 + >> 重定向会 Last Result=1 失败，
+    #    故写一个 .bat 包装文件（cd /d 仓库根 + venv python + 重定向），/TR 只指向 .bat 绝对路径。
+    bat = SCRIPTS / f"_run_paper_{arm}.bat"
+    bat.write_text(
+        "@echo off\r\n"
+        f'cd /d "{ROOT}"\r\n'
+        f'"{py}" -m freqtrade trade --config {cfg} --strategy {strat} '
+        f"--logfile {logfile} >> {stdout} 2>&1\r\n",
+        encoding="utf-8",
     )
-    ps = f"""
-$ErrorActionPreference='Stop'
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '{arg}' -WorkingDirectory '{ROOT}'
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(12)
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName '{task}' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName '{task}'
-Write-Output 'TASK_STARTED {task}'
-"""
-    rc, out = _ps_run(ps)
-    if rc != 0 or "TASK_STARTED" not in out:
+
+    def _sch(args, timeout=60):
+        r = subprocess.run(["schtasks.exe"] + args, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+    _sch(["/Delete", "/TN", task, "/F"])  # 容忍不存在
+    rc, out = _sch(["/Create", "/TN", task, "/TR", str(bat), "/SC", "MINUTE", "/MO", "30", "/F"])
+    if rc != 0 or "SUCCESS" not in out.upper():
+        print(f"[!] {arm}: 计划任务创建失败 rc={rc}\n{out.strip()[:400]}")
+        return None
+    rc, out = _sch(["/Run", "/TN", task])
+    if rc != 0 or "SUCCESS" not in out.upper():
         print(f"[!] {arm}: 计划任务启动失败 rc={rc}\n{out.strip()[:400]}")
         return None
+    print(f"[task] {arm}: 已注册 {task}（/SC MINUTE /MO 30, .bat 包装）并启动")
     return task
 
 
@@ -194,10 +206,12 @@ def main():
             print(f"    {n:>3} :{ARMS[n]['port']}  任务状态={state}  存活={'pong ✓' if alive else '无响应 ✗'}")
         return
 
-    if not args.no_kill:
+    if args.dry_run:
+        print("[dry-run] 不清理进程、不注册任务，仅打印动作")
+    elif not args.no_kill:
         killed = _kill_existing(only=args.only)
         print(f"[kill] 清理既有 freqtrade trade 进程（{args.only or '全部'}）: {killed if killed else '无'}")
-        if killed and not args.dry_run:
+        if killed:
             time.sleep(3)
     else:
         print("[kill] 跳过清理（--no-kill）")
@@ -211,7 +225,6 @@ def main():
 
     if args.dry_run:
         return
-
     deadline = time.time() + args.wait
     status = {n: False for n in names}
     while time.time() < deadline:
