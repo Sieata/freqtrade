@@ -104,6 +104,36 @@ def cohort_stats(rows):
     return n, winrate, profit
 
 
+def event_clusters(rows, max_gap_days=5):
+    """把已平仓 rows 按 close_date 聚成独立事件簇（相邻开仓/平仓日间隔 > max_gap_days 分界）。
+
+    rows 元素 = (pair, profit, close_date, ...)。用于 OI 事件臂：20 笔不等于 20 个独立事件，
+    若利润被单一大额共振日绑架，胜率会误导（RESEARCH 26.24）。
+    返回 list[(cluster_start, cluster_end, n_trades, profit)]，按时间升序。
+    """
+    import datetime as _dt
+    items = sorted(rows, key=lambda r: r[2])
+    clusters = []
+    cur = None
+    prev = None
+    for r in items:
+        cd = r[2]
+        if isinstance(cd, str):
+            cd = _dt.datetime.fromisoformat(cd.split("+")[0].split("Z")[0])
+        day = cd.date() if hasattr(cd, "date") else cd
+        if cur is None or prev is None or (day - prev).days > max_gap_days:
+            if cur is not None:
+                clusters.append(cur)
+            cur = [day, day, 0, 0.0]
+        cur[1] = day
+        cur[2] += 1
+        cur[3] += r[1]
+        prev = day
+    if cur is not None:
+        clusters.append(cur)
+    return [(a, b, n, p) for (a, b, n, p) in clusters]
+
+
 def load_closed(db):
     if not os.path.exists(db):
         return None, None
@@ -199,6 +229,19 @@ def main():
         if sn:
             print(f"  → 小币占利润 {share:.0f}%；达标判读须以「TOP10/中大盘」cohort 为准，")
             print(f"    小币(2025-26才上市、无完整周期)的贡献视为不确定项。")
+        print("-" * 66)
+    if args.strategy == "OIFlushV2":
+        cl = event_clusters(rows)
+        print("Event-cluster concentration  [RESEARCH 26.24]:")
+        print(f"  {n} 笔 → {len(cl)} 个独立事件簇（相邻平仓日间隔>5天分界）")
+        if cl:
+            top = max(cl, key=lambda c: c[3])
+            share_p = (top[3] / total_profit * 100) if total_profit else 0.0
+            share_n = top[2] / n * 100
+            print(f"  最大单簇：{top[0]}~{top[1]}  {top[2]} 笔({share_n:.0f}%)  ${top[3]:,.2f}(利润 {share_p:.0f}%)")
+            print(f"  → 判读：≥{CRITERIA['min_trades']} 笔≈{len(cl)} 个事件（样本合理），")
+            print(f"    但利润/PF 由罕见大额共振主导；须并列看「笔数/胜率」与「是否含大额簇」，")
+            print(f"    勿只看胜率（胜率可被单一大共振日绑架）。")
         print("-" * 66)
     print("Criteria check (vs. historical backtest baseline):")
     print(f"  {'metric':<16s} {'forward':>14s} {'baseline':>12s} {'criterion':>10s} {'result':>6s}")

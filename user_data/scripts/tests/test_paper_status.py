@@ -163,3 +163,27 @@ def test_split_pool_end_to_end_cli(tmp_path, capsys):
     assert "Pool split" in out
     assert "小币占利润 50%" in out
 
+
+
+def test_event_clusters_groups_close_days():
+    """event_clusters: 相邻平仓日间隔>5天切新簇，簇内累加笔数/利润。"""
+    rows = [
+        ("BTC/USDT:USDT", 10.0, "2026-01-01", 1000, 0),
+        ("ETH/USDT:USDT", 20.0, "2026-01-02", 1000, 0),  # 与上一间隔1天 → 同簇
+        ("SOL/USDT:USDT", -5.0, "2026-01-20", 1000, 0),  # 间隔18天 → 新簇
+    ]
+    cl = PS.event_clusters(rows)
+    assert len(cl) == 2
+    assert cl[0][2] == 2 and abs(cl[0][3] - 30.0) < 1e-9
+    assert cl[1][2] == 1 and abs(cl[1][3] + 5.0) < 1e-9
+
+
+def test_event_clusters_single_cluster():
+    """全部同日 → 1 簇。"""
+    rows = [("A/USDT:USDT", 1.0, "2026-01-01", 1000, 0),
+            ("B/USDT:USDT", 2.0, "2026-01-01", 1000, 0)]
+    assert len(PS.event_clusters(rows)) == 1
+
+
+def test_event_clusters_empty():
+    assert PS.event_clusters([]) == []
