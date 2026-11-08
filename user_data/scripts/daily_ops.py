@@ -4,9 +4,10 @@
   1) 数据新鲜度与接缝（复用 data_check.collect_pairs + check_metrics 的判定）
   2) 当前高离散度分位（复用 disp_monitor.dispersion_pct，RESEARCH 31/37）
   3) 两臂冻结状态摘要（V2 源码 SHA 是否仍等于冻结值；报告是否齐全）
+  4) paper bot 存活（探 V2:8080 / OI:8082 的 /api/v1/ping）
 
 只读，不写任何数据、不改源码、不碰 VAL。退出码：0=全部健康，1=有告警
-（数据缺口 / V2 源码 SHA 漂移 / 关键报告缺失）。
+（数据缺口 / V2 源码 SHA 漂移 / 关键报告缺失 / paper bot 无响应）。
 
 用法:
   .venv/Scripts/python.exe user_data/scripts/daily_ops.py
@@ -100,11 +101,59 @@ def current_dispersion():
     }
 
 
+PAPER_BOTS = [
+    ("V2", 8080),
+    ("OI", 8082),
+]
+
+
+def _paper_ping(port, timeout=2.0):
+    """对 paper bot 的 /api/v1/ping 做一次 HTTP GET。返回 True/False。
+
+    不依赖 requests（若未装则回退 urllib），不需要 api_server 认证也不会因 ping 失败。
+    只探端口是否在服务（pong），不读交易数据。
+    """
+    url = f"http://127.0.0.1:{port}/api/v1/ping"
+    try:
+        import requests
+
+        r = requests.get(url, timeout=timeout, auth=("freqtrader", "IUdQZFygM_n6weNX"))
+        return r.status_code == 200 and r.json().get("status") == "pong"
+    except Exception:
+        pass
+    try:
+        import json
+        import urllib.request
+
+        req = urllib.request.Request(url)
+        import base64
+
+        token = base64.b64encode(b"freqtrader:IUdQZFygM_n6weNX").decode()
+        req.add_header("Authorization", "Basic " + token)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read()).get("status") == "pong"
+    except Exception:
+        return False
+
+
+def check_paper_bots():
+    """返回 (alive_list, dead_list)，元素为 (name, port)。"""
+    alive, dead = [], []
+    for name, port in PAPER_BOTS:
+        (alive if _paper_ping(port) else dead).append((name, port))
+    return alive, dead
+
+
 def main():
     R.enable_utf8_console()
     ap = argparse.ArgumentParser(description="每日运维总览（只读，两臂健康度）")
     ap.add_argument("--pool", default="top10", help="用于数据新鲜度检查的池（默认 top10）")
     ap.add_argument("--days", type=int, default=14, help="离散度回看的宽限天数（默认 14，仅提示用）")
+    ap.add_argument(
+        "--no-bots",
+        action="store_true",
+        help="跳过 paper bot 存活检查（默认会探 8080/8082 的 ping）",
+    )
     args = ap.parse_args()
 
     alerts = 0
@@ -154,6 +203,16 @@ def main():
         print(f"    [!] {err}")
     else:
         print(f"    [ok] SHA 与冻结值一致 ({h[:16]}…)")
+
+    # 4) paper bot 存活（V2:8080 / OI:8082）
+    if not args.no_bots:
+        print("\n[4] paper bot 存活（V2:8080 / OI:8082）")
+        alive, dead = check_paper_bots()
+        for name, port in alive:
+            print(f"    [ok] {name} :{port} → pong")
+        for name, port in dead:
+            alerts += 1
+            print(f"    [!] {name} :{port} → 无响应（进程可能已退出，用 paper_start*.sh 重拉）")
 
     print("\n" + "=" * 60)
     if alerts:

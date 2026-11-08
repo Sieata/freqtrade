@@ -71,7 +71,7 @@
 .venv/bin/python user_data/scripts/exit_anatomy.py <zip>
 .venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB>
 
-# 每日运维总览（只读：数据接缝+离散度分位+V2冻结SHA 三合一）：daily_ops.py [--pool top10 --days 14]
+# 每日运维总览（只读四合一：数据接缝+离散度分位+V2冻结SHA+paper bot存活 8080/8082）：daily_ops.py [--pool top10 --days 14] [--no-bots]
 # 高离散度旁路监控（V2 环境指标，不改源码；RESEARCH 31/37）：disp_monitor.py [--days 30|--since/--until|--weekends-only]
 # 其他：time_splits.py（打印切分）/ make_universe.py（重生成池快照，需代理）/
 # import_funding_vision.py（新品种 funding 老数据）/ conn_probe.py（端点连通性）/ dep_closure.py（装环境）
