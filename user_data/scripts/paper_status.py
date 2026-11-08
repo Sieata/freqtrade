@@ -117,6 +117,7 @@ def main():
         sys.exit(1)
     if not rows:
         print("No closed trades yet. forward-test is running; wait for the first close.")
+        print(f"  判据：需 ≥{CRITERIA['min_trades']} 笔已平仓交易才具统计意义（当前 0 笔）。")
         sys.exit(0)
 
     total_profit = sum(r[1] for r in rows)
