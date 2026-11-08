@@ -68,3 +68,14 @@ VAL 独立显著 p=0.096（不显著，见 RESEARCH 26.x 宽度检验），BNB �
 - **OI/市值 feather 必须新鲜**：策略 `populate_indicators` 直读 `user_data/data/binance/futures_metrics/<pair>-4h-metrics.feather`，无 OI 数据的品种自动零信号（不进池）。
 - **OI 历史靠累积器**：`oi_accumulate.py` 每日跑（openInterestHist 仅 30 天，漏跑即永久缺口，无法回补）。启动前务必 `./refresh_all.sh`。
 - 每周 `paper_status.py --strategy OIFlushV2` 记录：笔数、胜率、回撤、累计利润。
+
+## 七、Live 一致性交叉校验（2026-11-08 轮29）
+
+paper bot 运行时通过 `/api/v1/pair_candles` 暴露其**实际计算的指标列**（oi_chg/oi_q/ret4/mom30/flush），
+可直接对账 paper_recon 的离线复刻：
+
+- **OI 臂**：10/10 品种 `oi_q` 数值逐位一致（diff 0.000%），10/10 `flush` 一致（全 False）——
+  证明 `sync_oi_to_metrics` 补的 metrics 与 bot 实际读的完全一致，且 recon 的 `oi_flush_entry`
+  忠实复刻 live 策略。
+- **V2 臂**：6/6 可比品种 `long_entry` 一致（BANK/CYS 本地无新鲜 feather，recon 已改走 bot API，见
+  paper_recon 轮28 修复）。
