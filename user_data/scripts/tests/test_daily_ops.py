@@ -51,6 +51,27 @@ def test_paper_ping_dead_port_returns_false():
     assert D._paper_ping(59999, timeout=0.5) is False
 
 
+def test_staleness_hours_none():
+    assert D.staleness_hours(None) is None
+
+
+def test_staleness_hours_computes_gap():
+    import pandas as pd
+
+    newest = pd.Timestamp("2026-11-08 04:00:00", tz="UTC")
+    now = pd.Timestamp("2026-11-08 16:00:00", tz="UTC")
+    assert abs(D.staleness_hours(newest, now) - 12.0) < 1e-6
+
+
+def test_staleness_threshold_flags_stale():
+    """>12h 应被判为陈旧（落下一根以上 4h bar）。"""
+    import pandas as pd
+
+    newest = pd.Timestamp("2026-11-08 00:00:00", tz="UTC")
+    now = pd.Timestamp("2026-11-08 20:00:00", tz="UTC")  # 20h
+    assert D.staleness_hours(newest, now) > 12
+
+
 def test_write_snapshot_appends_jsonl(tmp_path, monkeypatch):
     """_write_snapshot 必须追加而非覆盖，且每行是合法 JSON、含 ts_utc/alerts。"""
     import json

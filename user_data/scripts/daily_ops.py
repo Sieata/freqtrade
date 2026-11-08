@@ -72,6 +72,16 @@ def check_freshness(pairs):
     return problems, newest
 
 
+def staleness_hours(newest, now=None):
+    """最新 4h bar 距当前的小时数。newest 为 None 返回 None。可用于陈旧度告警。"""
+    if newest is None:
+        return None
+    import pandas as pd
+
+    now = now or pd.Timestamp.now(tz="UTC")
+    return (pd.Timestamp(now) - pd.Timestamp(newest)).total_seconds() / 3600
+
+
 def check_v2_sha():
     p = STRAT_DIR / "WeekendReverseV2.py"
     if not p.exists():
@@ -208,6 +218,20 @@ def main():
                 print(f"    [!] {p:<22} {msg}")
         else:
             print("    [ok] 无缺口、无重复")
+        # 陈旧度（age）检查：只看"最新 bar 距今多少小时"。
+        # check_freshness 只查接缝内部缺口；若每日刷新任务静默失败数天，尾部仍连续（无内部缺口），
+        # 会误报"无缺口"、绿灯；故必须独立按 age 判定，否则 = 静默停更不可见。
+        if newest is not None:
+            import pandas as pd
+
+            age_h = staleness_hours(newest)
+            snap["newest_age_h"] = round(age_h, 1)
+            # 4h bar：正常 0~8h（含下一次未收盘）；>12h 视为落下一根以上 → 告警。
+            if age_h > 12:
+                alerts += 1
+                print(f"    [!] 数据陈旧：最新 bar 距今 {age_h:.1f}h（>12h，保鲜任务可能未跑）")
+            else:
+                print(f"    [ok] 数据新鲜：最新 bar 距今 {age_h:.1f}h")
 
     # 2) 高离散度分位
     print(f"\n[2] 高离散度旁路指标（RESEARCH 31/37）")
