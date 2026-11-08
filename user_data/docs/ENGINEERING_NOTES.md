@@ -35,9 +35,13 @@
 1. **binance API 直连全超时；系统代理不在 shell 环境里**。Clash 类代理通常监听 `127.0.0.1:7897`
    （HTTP/HTTPS/SOCKS 同端口），终端必须显式 `export https_proxy=http://127.0.0.1:7897 http_proxy=...`。
    `scutil --proxy` 可查系统代理配置；`netstat -an | grep LISTEN` 可确认端口。
-2. **freqtrade 的两条数据路径代理行为不同**：download-data 走 sync ccxt(requests)，认环境变量即可；
-   live/dry-run 机器人走 aiohttp 异步，还需在 config 的 `ccxt_config` 里加 **`"aiohttp_trust_env": true`**
-   （config_paper_v2.json 已加）。漏了第二条的表现：机器人能启动但永远拉不到 K 线。
+2. **freqtrade 两条数据路径都认 config，命令行 --exchange 方式不套 ccxt_config（2026-11-08 更正）**：
+   早先以为 download-data 走 sync 只认环境变量即可——错。freqtrade 用 **命令行 `--exchange binance`** 构造
+   exchange 时**不读 config 的 `exchange.ccxt_config`**，async reload_markets 会打 api.binance.com 且不认
+   shell 代理，国内代理环境必报 ExchangeNotAvailable、K 线增量静默停更。**download-data 必须带 `--config`**
+   （如 config_perpetual.json，其 `ccxt_config.aiohttp_trust_env=true`），ccxt 才走 fapi 且认代理；
+   `--pairs/--timeframes` 覆盖 config 白名单/周期不影响语义。ensure-data.sh 已按此修复（3e07e76f2）。
+   live/dry-run 机器人同样靠 config 的 aiohttp_trust_env（config_paper_v2.json 已加）。
 3. **binance WAF 403 规律**：`/fapi/v1/fundingRate` 带 2021 年老 `startTime` 的查询稳定 403，
    近期 `startTime` 正常。所以补历史数据的组合拳是：**历史走 vision 桶 + 增量走 API**。
    补充（2026-08-29，Windows 设备 60 品种批量实测）：**突发大批量请求会把 funding 端点整体临时封锁

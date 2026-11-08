@@ -25,8 +25,11 @@
 ## 网络（国内网络，Clash 代理）
 
 - binance API 国内一般需代理。`refresh_all.sh` 与 `oi_accumulate.py` 会自动探测 `127.0.0.1:7897`，
-  不通则直连（2026-10-31 本机即直连可用）；临时命令仍可手动
+  不通则直连；临时命令仍可手动
   `export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897`。
+- **download-data 必须带 `--config`（2026-11-08 修复）**：用命令行 `--exchange binance` 构造 exchange
+  时 freqtrade 不套 config 的 `ccxt_config.aiohttp_trust_env`，国内代理下必报 ExchangeNotAvailable、
+  K 线增量静默停更。`ensure-data.sh` 已加 config_perpetual.json；手敲 download-data 同理带上它。
 - WAF 403 主要拦 funding 的老 startTime 查询：历史从 data.binance.vision 补（`user_data/scripts/import_funding_vision.py`，直连无需代理），近期增量走 API。批量拉取时 funding 端点会被整体临时封锁几分钟（连近期增量也 403），等几分钟小批量重试即可；vision 无 funding 每日包，个别月份 zip 缺件会留空洞（BNB 2025-11 先例），完整性检查看相邻间隔 >3 天。
 - GitHub SSH 22 直连正常，push 不需要代理。
 - 数据更新：`./ensure-data.sh`（增量；FT_PROXY 环境变量可覆盖代理）；跑完接 `data_check.py`
