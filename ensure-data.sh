@@ -66,7 +66,17 @@ echo "增量更新 K 线（4h + 1d，futures 模式自动补 funding/mark）..."
 echo "品种 (${#PAIRS[@]}): ${PAIRS[*]}"
 echo
 
+# 2026-11-08 修复：必须带 --config。freqtrade 用 --exchange 命令行参数构造 exchange 时
+# 不套用 config 里的 exchange.ccxt_config（aiohttp_trust_env=true），async reload_markets
+# 会走 api.binance.com 且不认代理（即便 shell export 了 https_proxy），国内代理环境下
+# 报 ExchangeNotAvailable、K 线增量静默停更。带 config_perpetual.json 后 ccxt_config 生效，
+# 走 fapi.binance.com 且 trust_env 认代理。--pairs/--timeframes 覆盖 config 里的白名单/周期。
+CFG_ARGS=()
+if [ -f "$ROOT/user_data/config_perpetual.json" ]; then
+    CFG_ARGS=(--config "$ROOT/user_data/config_perpetual.json")
+fi
 "$PY" -m freqtrade download-data \
+    "${CFG_ARGS[@]}" \
     --exchange binance \
     --trading-mode futures \
     --timeframes 4h 1d \
