@@ -1,0 +1,13 @@
+# paper8 池 —— WeekendReverseV2 forward-test 实际运行品种（与 config_paper_v2.json pair_whitelist 一致）
+# 生成: 2026-11-08 | 来源: user_data/config_paper_v2.json pair_whitelist 逐条复制
+# 规则: 只用于评估/复核 paper 池特征（26.20/26.22）；实盘品种仍以 FREEZE 文档为准。
+# 注意: BANK/CYS/HYPE 均为 2025-26 新上市，TEST 段（2022-2024）无数据，回测中不成交。
+#
+BTC/USDT:USDT
+ETH/USDT:USDT
+SOL/USDT:USDT
+XRP/USDT:USDT
+ZEC/USDT:USDT
+BANK/USDT:USDT
+CYS/USDT:USDT
+HYPE/USDT:USDT
