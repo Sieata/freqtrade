@@ -29,6 +29,14 @@ FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–7
 > FS 的 `fs_live_test_dryrun.sqlite` 建于 08-29 但 0 笔交易 / 0 笔订单；
 > BigMove / H8c 模拟器 db 或无或 0 行。**"paper 已跑 2 个月"是错误认知**，详见 26.10。
 
+> ✅ **2026-11-08 状态更新（用户授权启动 paper，V2+OI）**：本机已把两臂 paper forward-test
+> 装置补齐并实测启动成功（V2 端口 8080 / OI 端口 8082，均 dry_run、RUNNING、API pong 正常）。
+> OI 臂为本次新增：`config_paper_oi.json` + `paper_start_oi.sh`（SHA 冻结校验）+ `paper/FREEZE_OI.md`
+> + `paper_status.py` 支持两臂周报。⚠️ **但 paper 进程的生命周期绑定于运行会话/本机开机**——
+> 跨会话/重启后需用 `./user_data/scripts/paper_start.sh`（V2）与 `paper_start_oi.sh`（OI）
+> 重新拉起；是否长期在线取决于本机是否持续开机。截至本次提交两臂 0 笔平仓（属正常空窗，
+> 判据需 3 个月 / 20+ 笔）。
+
 **待决（2026-10-22 重排：实盘问题全部搁置）**
 
 > 用户 2026-10-22 定调：**暂不实盘，重心做研究**。以下 1–3 条相关事项冻结，
