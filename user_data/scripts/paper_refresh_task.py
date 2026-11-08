@@ -105,9 +105,26 @@ Register-ScheduledTask -TaskName '{TASK}' -Action $action -Trigger $trigger -Set
 Write-Output 'TASK_REGISTERED {TASK}'
 """
     rc, out = _ps_run(ps, timeout=90)
-    ok = "TASK_REGISTERED" in out
+    if "TASK_REGISTERED" in out:
+        print(out.strip())
+        return True
+    # 非管理员 fs2023 下，修改已存在任务 Register-ScheduledTask -Force 会 Access is denied
+    # （见 AGENTS.md 计划任务踩坑）。回退到 schtasks.exe（用户级、无管理员）。
+    if "Access is denied" in out or "拒绝访问" in out or rc != 0:
+        print("[fallback] PowerShell 注册被拒，改用 schtasks.exe /SC DAILY")
+        tr = f'bash -lc "{cmd} >> {log} 2>&1"'
+        hh, mm = at.split(":")
+        subprocess.run(["schtasks.exe", "/Delete", "/TN", TASK, "/F"], capture_output=True, text=True)
+        r = subprocess.run(
+            ["schtasks.exe", "/Create", "/TN", TASK, "/TR", tr,
+             "/SC", "DAILY", "/ST", f"{int(hh):02d}:{int(mm):02d}", "/F"],
+            capture_output=True, text=True,
+        )
+        ok = r.returncode == 0 and "SUCCESS" in ((r.stdout or "") + (r.stderr or "")).upper()
+        print(((r.stdout or "") + (r.stderr or "")).strip())
+        return ok
     print(out.strip())
-    return ok
+    return False
 
 
 def _run_once():
