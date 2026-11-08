@@ -89,3 +89,59 @@ def test_write_snapshot_appends_jsonl(tmp_path, monkeypatch):
     assert r0["bots_alive"] == ["V2", "OI"]
     assert r0["recon"]["v2"]["missed"] == 0
     assert r1["alerts"] == 1
+
+
+def _write_metrics(path, dates, oi_vals):
+    """辅助：写一个只有 date/oi_usd 的最小 metrics feather。"""
+    import pandas as pd
+
+    pd.DataFrame({"date": pd.to_datetime(dates, utc=True), "oi_usd": oi_vals}).to_feather(path)
+
+
+def test_check_oi_freshness_all_fresh(tmp_path, monkeypatch):
+    """全部品种 OI 在 24h 内 → 无 problems。"""
+    import pandas as pd
+
+    monkeypatch.setattr(D, "METRICS", tmp_path)
+    now = pd.Timestamp("2026-11-08 12:00:00", tz="UTC")
+    _write_metrics(tmp_path / "BTC_USDT_USDT-4h-metrics.feather",
+                   ["2026-11-08 04:00", "2026-11-08 08:00"], [1.0, 2.0])
+    probs, details = D.check_oi_freshness(["BTC/USDT:USDT"], now=now)
+    assert probs == []
+    assert details["BTC/USDT:USDT"] == pd.Timestamp("2026-11-08 08:00", tz="UTC")
+
+
+def test_check_oi_freshness_flags_stale(tmp_path, monkeypatch):
+    """核心盲区：accumulator 停跑 → OI 停在 30h 前，即使 K线还新鲜也必须告警。"""
+    import pandas as pd
+
+    monkeypatch.setattr(D, "METRICS", tmp_path)
+    now = pd.Timestamp("2026-11-08 12:00:00", tz="UTC")
+    _write_metrics(tmp_path / "BTC_USDT_USDT-4h-metrics.feather",
+                   ["2026-11-07 00:00", "2026-11-07 04:00"], [1.0, 2.0])
+    probs, details = D.check_oi_freshness(["BTC/USDT:USDT"], now=now)
+    assert len(probs) == 1
+    pair, msg = probs[0]
+    assert pair == "BTC/USDT:USDT" and "陈旧" in msg
+
+
+def test_check_oi_freshness_missing_file(tmp_path, monkeypatch):
+    """文件缺失 → 明确报缺失，不崩。"""
+    import pandas as pd
+
+    monkeypatch.setattr(D, "METRICS", tmp_path)
+    now = pd.Timestamp("2026-11-08 12:00:00", tz="UTC")
+    probs, details = D.check_oi_freshness(["XYZ/USDT:USDT"], now=now)
+    assert probs and "缺失" in probs[0][1]
+
+
+def test_check_oi_freshness_all_nan_oi(tmp_path, monkeypatch):
+    """oi_usd 全 NaN（accumulator 从未写入）→ 报 OI 全空。"""
+    import pandas as pd
+
+    monkeypatch.setattr(D, "METRICS", tmp_path)
+    now = pd.Timestamp("2026-11-08 12:00:00", tz="UTC")
+    _write_metrics(tmp_path / "ETH_USDT_USDT-4h-metrics.feather",
+                   ["2026-11-08 08:00"], [float("nan")])
+    probs, details = D.check_oi_freshness(["ETH/USDT:USDT"], now=now)
+    assert probs and "全空" in probs[0][1]

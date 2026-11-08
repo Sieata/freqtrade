@@ -23,6 +23,7 @@ import research_lib as R  # noqa: E402
 
 ROOT = Path(R.__file__).resolve().parent.parent
 DATA = ROOT / "data" / "binance" / "futures"
+METRICS = ROOT / "data" / "binance" / "futures_metrics"
 UNIVERSE = ROOT / "universe"
 STRAT_DIR = ROOT / "strategies"
 REPORTS = ROOT / "backtest_results"
@@ -70,6 +71,50 @@ def check_freshness(pairs):
             problems.append((p, f"{gaps} 处缺口 / {dups} 处重复"))
     newest = max(latest.values()) if latest else None
     return problems, newest
+
+
+def _metrics_fname(pair):
+    return METRICS / (pair.replace("/", "_").replace(":", "_") + "-4h-metrics.feather")
+
+
+def check_oi_freshness(pairs, now=None, max_age_h=24.0):
+    """检查 OI 臂输入（futures_metrics 的 oi_usd）是否新鲜且连续。
+
+    这是 OI 臂唯一的数据输入（accumulator 每日采集 openInterestHist，仅留 30 天、
+    漏跑不可回补）。K线用另一套端点，K线在更 ≠ OI 在更：accumulator 停跑时
+    K线检查仍绿，OI 臂会静默零信号且 daily_ops 全绿 —— 必须独立检查。
+
+    返回 (problems, details)。problems 为 (pair, msg) 列表；
+    details 为 {pair: last_oi_ts} 供展示。
+    """
+    import pandas as pd
+
+    problems, details = [], {}
+    now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="UTC")
+    for p in pairs:
+        f = _metrics_fname(p)
+        if not f.exists():
+            problems.append((p, "OI metrics 文件缺失"))
+            continue
+        try:
+            d = pd.read_feather(f)
+        except Exception as e:  # 损坏的 feather 不能让巡检崩
+            problems.append((p, f"OI metrics 读取失败: {e}"))
+            continue
+        if "oi_usd" not in d.columns:
+            problems.append((p, "无 oi_usd 列"))
+            continue
+        d["date"] = pd.to_datetime(d["date"], utc=True)
+        vo = d[d["oi_usd"].notna()].sort_values("date")
+        if vo.empty:
+            problems.append((p, "OI 全空（accumulator 从未写入）"))
+            continue
+        last = vo["date"].max()
+        details[p] = last
+        age_h = (now - last).total_seconds() / 3600
+        if age_h > max_age_h:
+            problems.append((p, f"OI 陈旧 {age_h:.1f}h（>{max_age_h:.0f}h，accumulator 可能停跑）"))
+    return problems, details
 
 
 def staleness_hours(newest, now=None):
@@ -232,6 +277,32 @@ def main():
                 print(f"    [!] 数据陈旧：最新 bar 距今 {age_h:.1f}h（>12h，保鲜任务可能未跑）")
             else:
                 print(f"    [ok] 数据新鲜：最新 bar 距今 {age_h:.1f}h")
+
+    # 1b) OI 臂输入新鲜度（futures_metrics 的 oi_usd）—— 独立于 K 线的检查。
+    #     OI 臂唯一输入；accumulator 停跑时 K 线仍绿而 OI 臂静默零信号，故必须单独查。
+    print("    [1b] OI 输入新鲜度（OI 臂 futures_metrics oi_usd）")
+    try:
+        import paper_recon as PR
+
+        oi_pairs = PR._bot_whitelist("oi")
+        oi_probs, oi_details = check_oi_freshness(oi_pairs)
+        snap["oi_pairs"] = len(oi_pairs)
+        snap["oi_problems"] = len(oi_probs)
+        if oi_details:
+            newest_oi = max(oi_details.values())
+            snap["oi_newest"] = str(newest_oi)[:19]
+            oi_age_h = (pd.Timestamp.now(tz="UTC") - newest_oi).total_seconds() / 3600
+            snap["oi_newest_age_h"] = round(oi_age_h, 1)
+            print(f"    OI 最新 {str(newest_oi)[:16]} UTC（{len(oi_details)}/{len(oi_pairs)} 品种有数据，距今 {oi_age_h:.1f}h）")
+        if oi_probs:
+            alerts += 1
+            for p, msg in oi_probs:
+                print(f"    [!] {p:<22} {msg}")
+        else:
+            print("    [ok] OI 输入全部新鲜、无缺口")
+    except Exception as e:  # 巡检自身不能因此崩
+        alerts += 1
+        print(f"    [!] OI 新鲜度检查失败: {e}")
 
     # 2) 高离散度分位
     print(f"\n[2] 高离散度旁路指标（RESEARCH 31/37）")

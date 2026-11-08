@@ -72,10 +72,11 @@
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082→与OI冲突，未启动；FREEZE_BIGMOVE）
 .venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报（支持 V2/OI/FS/BM）
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
-# OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 本机无自动调度，需人工定期跑，
-#   建议每次会话跑一次 refresh_all.sh。代理由脚本自动探测（7897 不通则直连），FT_PROXY 可覆盖。
-#   现状 2026-10-31：13 品种 508 点至 10-31，08-29→09-07 有 9 天缺口无法回补）
-# 5 9 * * * cd <repo> && .venv/bin/python user_data/scripts/oi_accumulate.py >> user_data/logs/oi_accumulate.log 2>&1
+# OI 累积器（OIFlush live 前置，漏跑无法回补；openInterestHist 仅留 30 天）。
+#   已由每日 paper_refresh 任务（09:10）经 refresh_all.sh 第[2/5]步自动跑；会话外也持续。
+#   手动补跑：./refresh_all.sh（代理由脚本自动探测 7897，不通则直连，FT_PROXY 可覆盖）。
+#   daily_ops [1b] 会独立检查 OI metrics 新鲜度（accumulator 停跑时 K 线仍绿，必须单独查）。
+#   历史已知不可回补缺口：08-29→09-07 共 9 天（openInterestHist 已过 30 天留存）。
 
 # 验证链（STRATEGY_WORKFLOW 第〇节 + 4.3）
 .venv/bin/python user_data/scripts/validate_strategy.py --strategy X --pool top10   # TEST+VAL + 门禁 + 报告(.md+.json)
@@ -91,7 +92,8 @@
 .venv/bin/python user_data/scripts/exit_anatomy.py <zip>
 .venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB>
 
-# 每日运维总览（只读五合一：数据接缝+离散度分位+V2冻结SHA+paper bot存活 8080/8082+信号对账[V2+OI]）：daily_ops.py [--pool top10 --days 14] [--no-bots] [--no-recon] [--record]
+# 每日运维总览（只读六合一：K线接缝+OI输入新鲜度+V2冻结SHA+paper bot存活 8080/8082+离散度分位+信号对账[V2+OI]）：daily_ops.py [--pool top10 --days 14] [--no-bots] [--no-recon] [--record]
+#   [1] K线接缝+age 陈旧度；[1b] OI 臂输入 futures_metrics oi_usd 新鲜度（accumulator 停跑时 K 线仍绿、须独立查，2026-11-08 加）；[2] 离散度分位；[3] V2 SHA；[4] 双 bot ping；[5] paper 信号对账
 #   --record 追加一条 JSONL 快照到 user_data/logs/daily_ops.jsonl（该目录被 gitignore，纯本机轨迹，供事后重建 forward-test 逐日状态）
 # paper 信号对账（单独跑；揪重启漏单：V2 周末窗口 long_entry / OI 去杠杆 flush，无对应 trade）：paper_recon.py --arm v2|oi --days 14 [--json]
 # 高离散度旁路监控（V2 环境指标，不改源码；RESEARCH 31/37）：disp_monitor.py [--days 30|--since/--until|--weekends-only]

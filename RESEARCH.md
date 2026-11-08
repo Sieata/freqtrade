@@ -63,6 +63,18 @@ FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–7
 > 本轮另确认：BANK/CYS 本地 feather 停在 2026-10-19（不在 TOP10 保鲜池），但 **live bot 运行期从交易所实时拉 OHLCV**，
 > API `pair_candles` 显示两品种均到 `2026-11-08 00:00` 且有完整指标 → 本地陈旧不影响 paper 成交（只影响回测/离线分析）。
 > 当前 2026-11-08 00:00 bar 上 8 品种 long_entry 全 False，无待入场。
+>
+> ✅ **2026-11-08 轮30 监控盲区修复：daily_ops 新增 OI 输入新鲜度检查（[1b]）**。
+> 发现 daily_ops 原 `[1]` 只查 K 线（OHLCV）接缝+age，**不查 OI 臂唯一输入 futures_metrics 的 oi_usd**。
+> 两者走不同端点：accumulator 停跑（API 封锁/代理断）时 K 线仍每日更新、`[1]` 依旧绿，而 OI 臂会
+> 静默零信号——正是本应被巡检抓住的失败模式。新增 `check_oi_freshness(pairs, now, max_age_h=24)`：
+> 逐品种读 `<pair>-4h-metrics.feather` 的 oi_usd 最新非空时间，>24h 报陈旧、缺文件/全空报问题；
+> 经 `paper_recon._bot_whitelist("oi")` 取 10 品种。快照新增 oi_pairs/oi_problems/oi_newest(_age_h)。
+> 实测：OI 最新 2026-11-08 08:00（10/10 品种有数据、距今 2.8h），全绿；K 线最新 04:00（6.8h）。
+> +4 单测（`test_check_oi_freshness_{all_fresh,flags_stale,missing_file,all_nan_oi}`），全套 81 passed。
+> 顺带核实：累积器本就由每日 paper_refresh 任务经 refresh_all.sh 第[2/5]步自动跑，OI 数据连续无缺口
+> （10 个 whitelist 品种均到 11-08 08:00；非 whitelist 品种停在 08-28 与本臂无关）；更正 AGENTS.md
+> 中"本机无自动调度、需人工跑"的旧说法与并不存在的 oi_accumulate.log 引用。
 
 **待决（2026-10-22 重排：实盘问题全部搁置）**
 
