@@ -45,6 +45,19 @@ FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–7
 > 端口 pong、跨多次 shell 调用存活。**仍绑本机开机；机器重启后需重跑 paper_restart.py 重拉。**
 > 数据侧确认：OI 十品种 metrics 已同步到 2026-11-08 04:00（sync_oi_to_metrics 追加尾巴），
 > 离线重算 oi_chg/oi_q 全部有效、当前无品种落入 flush 区（ZEC -0.041 vs 阈值 -0.111 最近）。
+>
+> ⚠️ **2026-11-08 轮11 运维发现：V2 paper 的「周末窗口 + process_only_new_candles」重启漏单隐患**。
+> V2 入场窗口默认 `buy_window_mode="fri_mon"`（`WeekendReverseV2.py:95-96` 窗口 = dow>=5 周六日 或 周一北京时≤21点），
+> 入场条件是「上一根跌 >buy_drop 且当前根收阳且 ret_1p 回升」。freqtrade `process_only_new_candles=True`
+> 意味着 bot 只对**启动后新收盘的 K 线**触发入场，历史已收盘 bar 的 long_entry 不会回溯成交。
+> 实测：ZEC 在 `2026-11-07 16:00 UTC`（周六）出现 long_entry=True，但 bot 于 `2026-11-08 14:13`（周日）
+> 才拉起，该 bar 早已收盘 → **信号被静默跳过、未成交**。后果：若 weekend 内重启 bot，
+> 重启前已收盘的周末入场信号全部丢失；周一（dow=0，bj_h≤21）重启前若信号已出同理。
+> 这是 forward-test 数据完整性的真实威胁——V2 只在周末窗口入场，一次恰当时机的重启即可漏掉整段边缘。
+> 处置：paper 期间尽量不在周末窗口内重启；重启后核对 `pair_candles` 里 window 内 recent long_entry=True 但无对应 trade 的 bar，人工登记为「漏单」。
+> 本轮另确认：BANK/CYS 本地 feather 停在 2026-10-19（不在 TOP10 保鲜池），但 **live bot 运行期从交易所实时拉 OHLCV**，
+> API `pair_candles` 显示两品种均到 `2026-11-08 00:00` 且有完整指标 → 本地陈旧不影响 paper 成交（只影响回测/离线分析）。
+> 当前 2026-11-08 00:00 bar 上 8 品种 long_entry 全 False，无待入场。
 
 **待决（2026-10-22 重排：实盘问题全部搁置）**
 
