@@ -67,6 +67,7 @@
 .venv/bin/python user_data/scripts/exit_anatomy.py <zip>
 .venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB>
 
+# 高离散度旁路监控（V2 环境指标，不改源码；RESEARCH 31/37）：disp_monitor.py [--days 30|--since/--until|--weekends-only]
 # 其他：time_splits.py（打印切分）/ make_universe.py（重生成池快照，需代理）/
 # import_funding_vision.py（新品种 funding 老数据）/ conn_probe.py（端点连通性）/ dep_closure.py（装环境）
 # 单测：.venv/Scripts/python.exe -m pytest user_data/scripts/tests -q -p no:cacheprovider
