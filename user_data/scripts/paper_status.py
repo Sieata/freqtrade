@@ -13,6 +13,7 @@ DB_DEFAULT = os.path.join(ROOT, "user_data", "tradesv3.dryrun.sqlite")
 DB_BY_STRATEGY = {
     "FundingSqueezeV1L": os.path.join(ROOT, "user_data", "tradesv3.dryrun.fs.sqlite"),
     "BigMoveV1": os.path.join(ROOT, "user_data", "tradesv3.dryrun.bigmove.sqlite"),
+    "OIFlushV2": os.path.join(ROOT, "user_data", "tradesv3.dryrun.oi.sqlite"),
 }
 
 # Backtest baselines (frozen in paper/FREEZE.md & FREEZE_V2.md; invalid if strategy changes).
@@ -47,6 +48,13 @@ BASELINES = {
         "trades": 38,
         "start_wallet": 5000,   # config_paper_bigmove: 3 并发 × $1,000
     },
+    "OIFlushV2": {
+        "profit_abs": 1293,     # TOP10 VAL 合计（独立 $1,000/笔；validate_..._20261019）
+        "winrate": 62.0,        # VAL win_rate 0.62
+        "dd": 2.4,              # VAL ddW 2.38%
+        "trades": 52,           # VAL n=52（TEST 44）
+        "start_wallet": 12000,  # config_paper_oi: 8 并发 × $1,000 + 缓冲
+    },
 }
 
 # Pre-defined forward-test criteria（默认 V1/V2；Tier B 臂各自 FREEZE 判据覆盖）
@@ -60,6 +68,8 @@ CRITERIA_BY_STRATEGY = {
     "FundingSqueezeV1L": {"min_trades": 50, "min_winrate": 45.0, "max_dd": 15.0},
     # FREEZE_BIGMOVE 第四节: 低频 ≥6 笔 / PF≥1.2(胜率近似 40%) / dd≤5%
     "BigMoveV1": {"min_trades": 6, "min_winrate": 40.0, "max_dd": 5.0},
+    # FREEZE_OI 第四节: 事件臂需补样本到显著，6 个月 ≥20 笔 / 胜率≥45% / dd≤10%
+    "OIFlushV2": {"min_trades": 20, "min_winrate": 45.0, "max_dd": 10.0},
 }
 
 def load_closed(db):

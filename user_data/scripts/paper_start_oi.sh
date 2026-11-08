@@ -1,0 +1,61 @@
+#!/bin/bash
+# OIFlushV2 forward-test launcher (paper trading / dry-run) — macOS/Linux 版
+# 用法（项目根目录）: ./user_data/scripts/paper_start_oi.sh
+# 前提: 数据已就绪（./refresh_all.sh，metrics/OI feather 需新鲜——策略直读
+#       user_data/data/binance/futures_metrics，OI 历史靠 oi_accumulate.py 累积）；
+#       与 V2 paper 可同机并行（独立 config/db/端口 8082），判据见 user_data/paper/FREEZE_OI.md
+
+set -euo pipefail
+
+# 纯 bash 定位脚本目录（不依赖 dirname，受限 shell 也可运行；2026-09-21 加固）
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in */*) ;; *) SELF="./$SELF" ;; esac
+ROOT="$(cd "${SELF%/*}/../.." && pwd)"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
+CONFIG="$ROOT/user_data/config_paper_oi.json"
+STRATEGY="OIFlushV2"
+LOGDIR="$ROOT/user_data/logs"
+LOGFILE="$LOGDIR/paper_oi_forwardtest.log"
+FROZEN_SHA="d714e0922be084932f2fe477a52a755b0507f9ebb01699830d2e45d154dc5a98"
+
+# 0. preflight
+[ -x "$PY" ] || { echo "[!] python not found: $PY" >&2; exit 1; }
+[ -f "$CONFIG" ] || { echo "[!] config not found: $CONFIG" >&2; exit 1; }
+
+# 1. 策略完整性：当前文件必须等于冻结快照（用 venv python 算 SHA256，不依赖 shasum/cut）
+CUR_SHA=$("$PY" -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$ROOT/user_data/strategies/$STRATEGY.py")
+if [ "$CUR_SHA" != "$FROZEN_SHA" ]; then
+    echo "[!] $STRATEGY.py SHA256 mismatch — forward-test 作废 (paper/FREEZE_OI.md)" >&2
+    echo "    expected: $FROZEN_SHA" >&2
+    echo "    current:  $CUR_SHA" >&2
+    exit 1
+fi
+echo "[ok] strategy SHA256 matches frozen snapshot"
+
+# 2. 代理（binance API 需代理，与 ensure-data.sh 相同约定）
+FT_PROXY="${FT_PROXY:-http://127.0.0.1:7897}"
+if [ "$FT_PROXY" != "none" ]; then
+    export https_proxy="$FT_PROXY" http_proxy="$FT_PROXY"
+fi
+
+"$PY" -c "import os,sys;os.makedirs(sys.argv[1],exist_ok=True)" "$LOGDIR"
+cd "$ROOT"   # 保证相对路径(db_url/logs)统一解析到项目根
+
+# 3. 提醒：metrics/OI feather 必须新鲜，否则策略读到旧 OI 序列、分位失真
+echo "[i] 提示：启动前请确保已跑 ./refresh_all.sh（OI 累积器需每日人工跑，漏跑即永久缺口）"
+
+# 4. 后台启动 dry-run（输出已重定向到日志，disown 防 SIGHUP，无需 nohup）
+"$PY" -m freqtrade trade --config "$CONFIG" --strategy "$STRATEGY" \
+    --logfile "$LOGFILE" > "$LOGDIR/paper_oi_stdout.log" 2>&1 &
+PID=$!
+disown
+
+echo
+echo "[OK] OI forward-test started (PID $PID)"
+echo "    log:      $LOGFILE"
+echo "    db:       user_data/tradesv3.dryrun.oi.sqlite"
+echo "    api/ui:   http://127.0.0.1:8082  (账号见 config_paper_oi.json)"
+echo "    stop:     kill $PID"
+echo
+echo "note: 策略 SHA 已在启动前与冻结快照比对(见上方 [ok]); 期间改动策略文件会使本次 forward-test 作废。"
