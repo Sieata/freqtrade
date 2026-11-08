@@ -154,6 +154,11 @@ def main():
         action="store_true",
         help="跳过 paper bot 存活检查（默认会探 8080/8082 的 ping）",
     )
+    ap.add_argument(
+        "--no-recon",
+        action="store_true",
+        help="跳过 paper 信号对账（默认对 V2 周末窗口 long_entry 与开仓对账）",
+    )
     args = ap.parse_args()
 
     alerts = 0
@@ -213,6 +218,28 @@ def main():
         for name, port in dead:
             alerts += 1
             print(f"    [!] {name} :{port} → 无响应（进程可能已退出，用 paper_start*.sh 重拉）")
+
+    # 5) paper 信号对账（V2 周末窗口 long_entry vs 实际开仓，揪重启漏单）
+    if not args.no_recon:
+        print("\n[5] paper 信号对账（V2 周末窗口 long_entry vs 实际开仓）")
+        try:
+            import paper_recon as PR
+
+            r = PR.recon_arm("v2", days=args.days, pool=args.pool)
+            print(
+                f"    最近 {args.days} 天：窗口内 long_entry {r['n_entries']} 个 | "
+                f"DB 实际开仓 {r['n_trades']} 笔 | bot 上线(≈) {r['first_heartbeat_utc']}"
+            )
+            if r["missed"]:
+                alerts += 1
+                print(f"    [!] 疑似漏单 {len(r['missed'])} 条（上线后窗口内信号、无对应 trade）：")
+                for m in r["missed"]:
+                    print(f"        {m['pair']:<18} {m['bar']} close={m['close']}")
+            else:
+                print("    [ok] 无上线后漏单")
+        except Exception as e:  # 缺数据/解析失败不致命
+            print(f"    [!] 对账失败: {e}")
+            alerts += 1
 
     print("\n" + "=" * 60)
     if alerts:
