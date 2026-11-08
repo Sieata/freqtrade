@@ -45,11 +45,12 @@
 .venv/bin/python user_data/scripts/data_check.py --pools top10       # 单独校验；退出码 1 = 有缺口/重复
 # ⚠️ core/volume 默认不保鲜（2026-10-31 实测：37 个 core 品种停在 09-21）；泛化测试前先 --pool core
 
-# paper forward-test（⚠️ 本机没有 paper 设备，从未跑过一轮 —— 以下命令未经确认无 db 可读）
-./user_data/scripts/paper_start.sh          # V2（内置 SHA 校验，不匹配拒绝启动）
-./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28）
-./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082，FREEZE_BIGMOVE）
-.venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报
+# paper forward-test（2026-11-08 起 V2+OI 两臂已在跑；进程随本机开机，重启后需重新拉起）
+./user_data/scripts/paper_start.sh          # V2（端口 8080；内置 SHA 校验，不匹配拒绝启动）
+./user_data/scripts/paper_start_oi.sh        # OIFlushV2（端口 8082；SHA 冻结校验；判据见 paper/FREEZE_OI.md）
+./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28；未启动）
+./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082→与OI冲突，未启动；FREEZE_BIGMOVE）
+.venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报（支持 V2/OI/FS/BM）
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
 # OI 累积器（OIFlush live 前置，漏跑无法回补；⚠️ 本机无自动调度，需人工定期跑，
 #   建议每次会话跑一次 refresh_all.sh。代理由脚本自动探测（7897 不通则直连），FT_PROXY 可覆盖。
