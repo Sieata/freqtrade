@@ -72,6 +72,38 @@ CRITERIA_BY_STRATEGY = {
     "OIFlushV2": {"min_trades": 20, "min_winrate": 45.0, "max_dd": 10.0},
 }
 
+# 冻结 paper 池里的非 TOP10 小币（V2 池 = 8 品种，含 BANK/CYS 而非 BNB/TRX/DOGE/XMR）。
+# 用途：--split-pool 把 forward-test 结果按"TOP10 品种 vs 小币"分列，避免 BANK/CYS 的新币 pump
+# 冒充 V2 机制 edge（RESEARCH 26.20：VAL 段这两币 35% 交易却 44% 利润）。
+SMALL_CAP_PAIRS = ("BANK/USDT:USDT", "CYS/USDT:USDT")
+
+
+def split_by_pool(rows, small_caps=SMALL_CAP_PAIRS):
+    """把已平仓 rows 拆成 (core_rows, small_cap_rows)。rows 元素 = (pair, profit, close_date, ...)。
+
+    按 pair 前缀匹配小币（容忍交易所后缀差异）。返回两个 list，保持原顺序。
+    """
+    sc = tuple(p.split("/")[0].upper() for p in small_caps)
+
+    def is_small(pair):
+        base = str(pair).split("/")[0].upper()
+        return base in sc
+
+    core = [r for r in rows if not is_small(r[0])]
+    small = [r for r in rows if is_small(r[0])]
+    return core, small
+
+
+def cohort_stats(rows):
+    """一组已平仓 rows 的 (笔数, 胜率%, 总利润)。空集返回 (0, 0.0, 0.0)。"""
+    n = len(rows)
+    if n == 0:
+        return 0, 0.0, 0.0
+    profit = sum(r[1] for r in rows)
+    winrate = sum(1 for r in rows if r[1] > 0) / n * 100
+    return n, winrate, profit
+
+
 def load_closed(db):
     if not os.path.exists(db):
         return None, None
@@ -104,6 +136,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--strategy", default="WeekendReverseV2", choices=sorted(BASELINES))
     ap.add_argument("--db", default=None, help="覆盖 db 路径（默认按策略解析）")
+    ap.add_argument("--split-pool", action="store_true",
+                    help="按 TOP10品种 vs 小币(BANK/CYS) 分列胜率/利润，防止小币pump冒充机制edge（RESEARCH 26.20）")
     args = ap.parse_args()
     BASELINE = BASELINES[args.strategy]
     CRITERIA.update(CRITERIA_BY_STRATEGY.get(args.strategy, {}))
@@ -153,6 +187,19 @@ def main():
     for p, v in sorted(by_pair.items(), key=lambda x: -x[1]):
         print(f"  {p:<20s} ${v:>12,.2f}")
     print("-" * 66)
+    if args.split_pool:
+        core, small = split_by_pool(rows)
+        cn, cwr, cp = cohort_stats(core)
+        sn, swr, sp = cohort_stats(small)
+        share = (sp / total_profit * 100) if total_profit else 0.0
+        print("Pool split (TOP10-pairs vs small-cap BANK/CYS)  [RESEARCH 26.20]:")
+        print(f"  {'cohort':<22s} {'trades':>7s} {'win%':>7s} {'profit$':>12s}")
+        print(f"  {'TOP10/中大盘':<20s} {cn:>7d} {cwr:>6.1f}% {cp:>12,.2f}")
+        print(f"  {'小币(BANK/CYS)':<19s} {sn:>7d} {swr:>6.1f}% {sp:>12,.2f}")
+        if sn:
+            print(f"  → 小币占利润 {share:.0f}%；达标判读须以「TOP10/中大盘」cohort 为准，")
+            print(f"    小币(2025-26才上市、无完整周期)的贡献视为不确定项。")
+        print("-" * 66)
     print("Criteria check (vs. historical backtest baseline):")
     print(f"  {'metric':<16s} {'forward':>14s} {'baseline':>12s} {'criterion':>10s} {'result':>6s}")
     checks = [

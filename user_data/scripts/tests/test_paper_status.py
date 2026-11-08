@@ -114,3 +114,52 @@ def test_oi_criteria_match_freeze_doc():
     assert oi["min_trades"] == 20
     assert oi["min_winrate"] == 45.0
     assert oi["max_dd"] == 10.0
+
+
+def test_small_cap_pairs_constant():
+    """小币清单锁定为 BANK/CYS（冻结 paper 池相对 TOP10 的差集；RESEARCH 26.20）。"""
+    assert set(p.split("/")[0] for p in PS.SMALL_CAP_PAIRS) == {"BANK", "CYS"}
+
+
+def test_split_by_pool_partitions():
+    """split_by_pool 按 pair 前缀把 BANK/CYS 与小币分开，且不丢不重。"""
+    rows = [
+        ("BTC/USDT:USDT", 50.0, "d1", 1000, 0),
+        ("BANK/USDT:USDT", 30.0, "d2", 1000, 0),
+        ("CYS/USDT:USDT", -10.0, "d3", 1000, 0),
+        ("ZEC/USDT:USDT", 20.0, "d4", 1000, 0),
+    ]
+    core, small = PS.split_by_pool(rows)
+    assert [r[0] for r in core] == ["BTC/USDT:USDT", "ZEC/USDT:USDT"]
+    assert [r[0] for r in small] == ["BANK/USDT:USDT", "CYS/USDT:USDT"]
+    assert len(core) + len(small) == len(rows)
+
+
+def test_cohort_stats_basic():
+    """cohort_stats = (笔数, 胜率%, 总利润)；空集 (0,0.0,0.0)。"""
+    rows = [("A", 50.0, "d", 1000, 0), ("B", -10.0, "d", 1000, 0)]
+    n, wr, p = PS.cohort_stats(rows)
+    assert n == 2 and wr == 50.0 and p == 40.0
+    assert PS.cohort_stats([]) == (0, 0.0, 0.0)
+
+
+def test_split_pool_end_to_end_cli(tmp_path, capsys):
+    """--split-pool 端到端：生成 db 后跑 main，输出含 pool split 段与小币占利润。"""
+    db = tmp_path / "t.sqlite"
+    _make_db(db, rows=[
+        ("BTC/USDT:USDT", 100.0, "2026-01-01", 1000, 0),
+        ("ETH/USDT:USDT", 100.0, "2026-01-02", 1000, 0),
+        ("BANK/USDT:USDT", 200.0, "2026-01-03", 1000, 0),
+    ])
+    import sys as _sys
+    old = _sys.argv
+    try:
+        _sys.argv = ["paper_status.py", "--strategy", "WeekendReverseV2",
+                     "--db", str(db), "--split-pool"]
+        PS.main()
+    finally:
+        _sys.argv = old
+    out = capsys.readouterr().out
+    assert "Pool split" in out
+    assert "小币占利润 50%" in out
+

@@ -70,7 +70,9 @@
 #   任务名 paper_refresh，动作=Git bash 执行 refresh_all.sh --pool top10，日志 user_data/logs/paper_refresh_launcher.log
 ./user_data/scripts/paper_start_fs.sh       # FundingSqueezeV1L（端口 8081，FREEZE_FS 评审 2027-02-28；未启动）
 ./user_data/scripts/paper_start_bigmove.sh  # BigMoveV1（端口 8082→与OI冲突，未启动；FREEZE_BIGMOVE）
-.venv/bin/python user_data/scripts/paper_status.py [--strategy X]                   # 周报（支持 V2/OI/FS/BM）
+.venv/bin/python user_data/scripts/paper_status.py [--strategy X] [--split-pool]   # 周报（支持 V2/OI/FS/BM）
+#   --split-pool：按 TOP10品种 vs 小币(BANK/CYS) 分列胜率/利润。V2 冻结 paper 池含 BANK/CYS，
+#   VAL 段这两币 35% 交易却 44% 利润（RESEARCH 26.20）→ 达标判读须以「TOP10/中大盘」cohort 为准。
 .venv/bin/python user_data/scripts/signal_recon.py --strategy X --db <sqlite>       # 月度信号对账
 # OI 累积器（OIFlush live 前置，漏跑无法回补；openInterestHist 仅留 30 天）。
 #   已由每日 paper_refresh 任务（09:10）经 refresh_all.sh 第[2/5]步自动跑；会话外也持续。
