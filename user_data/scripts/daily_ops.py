@@ -144,6 +144,25 @@ def check_paper_bots():
     return alive, dead
 
 
+def _write_snapshot(snap, alerts):
+    """追加一条 UTF-8 JSONL 快照到 user_data/logs/daily_ops.jsonl。
+
+    只追加、不改历史，供事后重建 forward-test 的逐日轨迹
+    （数据新鲜度 / 离散度 / 两臂存活 / 信号与漏单计数）。
+    """
+    import json
+    from datetime import datetime, timezone
+
+    rec = {"ts_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "alerts": alerts}
+    rec.update(snap)
+    path = ROOT / "logs" / "daily_ops.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    print(f"    [record] 已追加快照 → {path.relative_to(ROOT)}")
+
+
 def main():
     R.enable_utf8_console()
     ap = argparse.ArgumentParser(description="每日运维总览（只读，两臂健康度）")
@@ -159,8 +178,14 @@ def main():
         action="store_true",
         help="跳过 paper 信号对账（默认对 V2 周末窗口 long_entry 与开仓对账）",
     )
+    ap.add_argument(
+        "--record",
+        action="store_true",
+        help="追加一条 JSONL 快照到 user_data/logs/daily_ops.jsonl（默认不写，保持只读）",
+    )
     args = ap.parse_args()
 
+    snap = {}  # 供 --record 落盘的结构化快照
     alerts = 0
     print("=" * 60)
     print("每日运维总览  daily_ops")
@@ -174,6 +199,8 @@ def main():
         alerts += 1
     else:
         probs, newest = check_freshness(pairs)
+        snap["newest_bar"] = str(newest)[:19] if newest is not None else None
+        snap["data_problems"] = len(probs)
         print(f"    最新 4h bar: {str(newest)[:16] if newest is not None else 'N/A'} (UTC)")
         if probs:
             alerts += 1
@@ -191,6 +218,9 @@ def main():
             alerts += 1
         else:
             flag = "★高离散" if d["high"] else "非高离散"
+            snap["disp_pct"] = round(d["disp"] * 100, 3)
+            snap["disp_pctile"] = round(d["pct"], 4)
+            snap["disp_high"] = bool(d["high"])
             print(
                 f"    最新 bar {d['bar']} UTC | disp={d['disp'] * 100:.2f}% "
                 f"pct={d['pct']:.3f} → {flag}"
@@ -203,6 +233,7 @@ def main():
     # 3) V2 冻结 SHA
     print("\n[3] V2 源码冻结状态")
     h, err = check_v2_sha()
+    snap["v2_sha_ok"] = err is None
     if err:
         alerts += 1
         print(f"    [!] {err}")
@@ -213,6 +244,8 @@ def main():
     if not args.no_bots:
         print("\n[4] paper bot 存活（V2:8080 / OI:8082）")
         alive, dead = check_paper_bots()
+        snap["bots_alive"] = [n for n, _ in alive]
+        snap["bots_dead"] = [n for n, _ in dead]
         for name, port in alive:
             print(f"    [ok] {name} :{port} → pong")
         for name, port in dead:
@@ -240,11 +273,18 @@ def main():
                         print(f"          {m['pair']:<18} {m['bar']} close={m['close']}")
                 else:
                     print(f"      [ok] {arm} 无上线后漏单")
+                snap.setdefault("recon", {})[arm] = {
+                    "signals": r["n_entries"],
+                    "trades": r["n_trades"],
+                    "missed": len(r["missed"]),
+                }
         except Exception as e:  # 缺数据/解析失败不致命
             print(f"    [!] 对账失败: {e}")
             alerts += 1
 
     print("\n" + "=" * 60)
+    if args.record:
+        _write_snapshot(snap, alerts)
     if alerts:
         print(f"结论：{alerts} 项告警，请排查")
         sys.exit(1)

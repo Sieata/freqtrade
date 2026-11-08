@@ -78,7 +78,8 @@
 .venv/bin/python user_data/scripts/exit_anatomy.py <zip>
 .venv/bin/python user_data/scripts/arm_compare.py <zipA> <zipB>
 
-# 每日运维总览（只读五合一：数据接缝+离散度分位+V2冻结SHA+paper bot存活 8080/8082+信号对账[V2+OI]）：daily_ops.py [--pool top10 --days 14] [--no-bots] [--no-recon]
+# 每日运维总览（只读五合一：数据接缝+离散度分位+V2冻结SHA+paper bot存活 8080/8082+信号对账[V2+OI]）：daily_ops.py [--pool top10 --days 14] [--no-bots] [--no-recon] [--record]
+#   --record 追加一条 JSONL 快照到 user_data/logs/daily_ops.jsonl（该目录被 gitignore，纯本机轨迹，供事后重建 forward-test 逐日状态）
 # paper 信号对账（单独跑；揪重启漏单：V2 周末窗口 long_entry / OI 去杠杆 flush，无对应 trade）：paper_recon.py --arm v2|oi --days 14 [--json]
 # 高离散度旁路监控（V2 环境指标，不改源码；RESEARCH 31/37）：disp_monitor.py [--days 30|--since/--until|--weekends-only]
 # 其他：time_splits.py（打印切分）/ make_universe.py（重生成池快照，需代理）/
