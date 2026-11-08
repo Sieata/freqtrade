@@ -43,6 +43,11 @@ FundingSqueezeV1L / BigMoveV1：Tier B 未过（集中度门禁3，利润 69–7
 > 唯一可靠解：让 Task Scheduler 服务承载 bot 进程（任务名 paper_v2 / paper_oi，-Force 防重复、
 > 启动前 SHA 校验）。统一入口 `paper_restart.py [--only v2|oi] [--status]`，实测两臂任务 Running、
 > 端口 pong、跨多次 shell 调用存活。**仍绑本机开机；机器重启后需重跑 paper_restart.py 重拉。**
+> ✅ **2026-11-08 轮26 健全化（b6b8a8642）**：原触发是 `-Once -At +12h`（一次性、无重复、无开机触发），
+> bot 崩溃/机器重启不会自愈。本机用户 fs2023 非管理员，`Register-ScheduledTask -Force` 与 `/SC ONSTART`
+> 均 Access denied。改走 `schtasks /Create /F /SC MINUTE /MO 30`（用户级、每 30 分钟重复自愈，单实例
+> 防双开），动作指向自动生成的 `.bat` 包装（解决内联 /TR 引号+重定向 Last Result=1）。实测杀 v2 进程
+> → 任务转 Ready → /Run 恢复 pong。并修 `--dry-run` 误杀在跑 bot 的 bug。见 AGENTS.md 计划任务段。
 > 数据侧确认：OI 十品种 metrics 已同步到 2026-11-08 04:00（sync_oi_to_metrics 追加尾巴），
 > 离线重算 oi_chg/oi_q 全部有效、当前无品种落入 flush 区（ZEC -0.041 vs 阈值 -0.111 最近）。
 >
